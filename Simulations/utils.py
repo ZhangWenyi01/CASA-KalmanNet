@@ -63,12 +63,12 @@ def DataGenCPD(args, SysModel_data, fileName):
     if args.randomLength:
         train_lengthMask = SysModel_data.lengthMask
         
-    changeindex = SysModel_data.changepoint
-    # Assuming train_input and train_target are tensors with shape [time, features]
-    time = range(100)
-    x = time
-    y_input = torch.squeeze(train_input[0:1,:,:]).numpy()  # Assuming we are plotting the first feature
-    y_target = torch.squeeze(train_target[0:1,0:1, :]).numpy()  # Assuming we are plotting the first feature
+    # changeindex = SysModel_data.changepoint
+    # # Assuming train_input and train_target are tensors with shape [time, features]
+    # time = range(100)
+    # x = time
+    # y_input = torch.squeeze(train_input[0:1,:,:]).numpy()  # Assuming we are plotting the first feature
+    # y_target = torch.squeeze(train_target[0:1,0:1, :]).numpy()  # Assuming we are plotting the first feature
 
     # # Plot the train_input and train_target
     # plt.figure()

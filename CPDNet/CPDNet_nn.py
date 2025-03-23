@@ -22,7 +22,6 @@ class CPDNetNN(nn.Module):
         
         # Additional layers
         self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(0.2)
         self.normalization = nn.BatchNorm1d(hidden_size)
         
         # Move all layers to device
@@ -40,11 +39,15 @@ class CPDNetNN(nn.Module):
         # LSTM forward pass
         out, _ = self.lstm(x, (h0, c0))
         
-        # Apply activation, normalization and dropout
-        out = self.activation(out)
+        # Apply batch normalization (before activation)
         out = self.normalization(out.transpose(1, 2)).transpose(1, 2)
-        out = self.dropout(out)
+        
+        # Apply activation
+        out = self.activation(out)
         
         # Get final output - no need to reshape
-        out = self.fc(out[:, -1, :])
-        return out
+        out = self.fc(out)
+
+        # Add sigmoid activation to ensure output values are between 0 and 1
+        out = torch.sigmoid(out)
+        return out[:, -1, :]

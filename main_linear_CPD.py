@@ -160,26 +160,22 @@ CPD_Pipeline.setTrainingParams(args)
 #    print("Train Loss on All States (if false, loss on position only):", Train_Loss_On_AllState)
 #    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = KNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results, MaskOnState=not Train_Loss_On_AllState)
 
-if (KnownRandInit_test): 
-   print("Generate CPD dataset with Known Random Initial State")
-   ## Test Neural Network
-   print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
-   # [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
-   KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
-else: 
-   print("Generate CPD dataset with Unknown Initial State")
-   ## Test Neural Network
-   print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
-   KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState)
 
+print("Generate CPD dataset with Known Random Initial State")
+## Test Neural Network
+print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
+# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
+KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD,cv_input_CPD,cv_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD,cv_init=cv_init_CPD)
 
 # Load index_error data
 index_error_data = torch.load(path_results_CPD+'/index_error.pt', map_location=device)
 
 # Separate index and error
-index = index_error_data['index']
-error = index_error_data['error']
+index_test = index_error_data['index_test']
+error_test = index_error_data['error_test']
+index_cv = index_error_data['index_cv']
+error_cv = index_error_data['error_cv']
 
 
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input_CPD, cv_target_CPD, error, index, path_results_CPD, MaskOnState=not Train_Loss_On_AllState, randomInit = True, cv_init=cv_init_CPD)
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,error_cv, index_cv, error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)

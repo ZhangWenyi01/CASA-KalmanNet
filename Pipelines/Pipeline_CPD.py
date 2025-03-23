@@ -9,6 +9,8 @@ import random
 import time
 from Plot import Plot_extended
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+import os
 
 class Pipeline_CPD:
 
@@ -19,6 +21,7 @@ class Pipeline_CPD:
         self.modelName = modelName
         self.modelFileName = self.folderName + "model_" + self.modelName + ".pt"
         self.PipelineName = self.folderName + "pipeline_" + self.modelName + ".pt"
+        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
 
     def save(self):
         torch.save(self, self.PipelineName)
@@ -41,7 +44,7 @@ class Pipeline_CPD:
         self.weightDecay = args.wd # L2 Weight Regularization - Weight Decay
         self.alpha = args.alpha # Composition loss factor
         # MSE LOSS Function
-        self.loss_fn = nn.MSELoss(reduction='mean')
+        self.loss_fn = nn.BCELoss(reduction='mean')
         self.sample_interval = args.sample_interval
 
         # Use the optim package to define an Optimizer that will update the weights of
@@ -86,8 +89,8 @@ class Pipeline_CPD:
         else:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)         
         
-        for t in range(0, SysModel.T_test):
-            x_out_test[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(test_input[:,:, t],2)))
+        for t in range(0, SysModel.T_test-self.sample_interval+1):
+            x_out_test[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(test_input[:,:, t:t+self.sample_interval],2)))
         
         end = time.time()
         t = end - start
@@ -125,17 +128,6 @@ class Pipeline_CPD:
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, x_out_test, t]
 
-    def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
-
-        self.Plot = Plot_extended(self.folderName, self.modelName)
-
-        self.Plot.NNPlot_epochs(self.N_steps, MSE_KF_dB_avg,
-                                self.MSE_test_dB_avg, self.MSE_cv_dB_epoch, self.MSE_train_dB_epoch)
-
-        self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
-        
-    
-    
     def CPDNNTrain(self, SysModel,cv_input, cv_target, train_input, train_target, path_results, \
         MaskOnState=False, randomInit=False,cv_init=None,train_init=None,\
         train_lengthMask=None,cv_lengthMask=None):
@@ -195,18 +187,6 @@ class Pipeline_CPD:
                     y_training_batch[ii,:,:] = train_input[index]
                     train_target_batch[ii,:,:] = train_target[index]
                 ii += 1
-            
-            # # Init Sequence
-            # if(randomInit):
-            #     train_init_batch = torch.empty([self.N_B, 1,1]).to(self.device)
-            #     ii = 0
-            #     for index in n_e:
-            #         train_init_batch[ii,:,0] = torch.squeeze(train_init[index])
-            #         ii += 1
-            #     # self.model.InitSequence(train_init_batch, SysModel.T)
-            # else:
-            #     self.model.InitSequence(\
-            #     SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_B,1,1), SysModel.T)
             
             # Forward Computation
             for t in range(0, SysModel.T-self.sample_interval+1):
@@ -281,9 +261,30 @@ class Pipeline_CPD:
             self.optimizer.step()
             # self.scheduler.step(self.MSE_cv_dB_epoch[ti])
 
-            #################################
+            ########################
+            ### Training Summary ###
+            ########################
+            print(ti, "MSE Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE Validation :", self.MSE_cv_dB_epoch[ti],
+                  "[dB]")
+                      
+            if (ti > 1):
+                d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
+                d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
+                print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
+
+            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
+            
+            
+
+            ########################
+            ###      Summary     ###
+            ########################
+            self.writer.add_scalar('Loss/train_dB', self.MSE_train_dB_epoch[ti], ti)
+            self.writer.add_scalar('Loss/validation_dB', self.MSE_cv_dB_epoch[ti], ti)
+
+            ########################
             ### Validation Sequence Batch ###
-            #################################
+            ########################
 
             # Cross Validation Mode
             self.model.eval()
@@ -294,7 +295,7 @@ class Pipeline_CPD:
 
                 # SysModel.T_test = cv_input.size()[-1] # T_test is the maximum length of the CV sequences
 
-                x_out_cv_batch = torch.empty([self.N_CV, SysModel.m, SysModel.T_test]).to(self.device)
+                x_out_cv_batch = torch.empty([self.N_CV, 1, SysModel.T_test-self.sample_interval+1]).to(self.device)
                 
                 # # Init Sequence
                 # if(randomInit):
@@ -350,5 +351,16 @@ class Pipeline_CPD:
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
+        self.writer.close()
+
         return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch, self.MSE_train_linear_epoch, self.MSE_train_dB_epoch]
+    
+    def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
+
+        self.Plot = Plot_extended(self.folderName, self.modelName)
+
+        self.Plot.NNPlot_epochs(self.N_steps, MSE_KF_dB_avg,
+                                self.MSE_test_dB_avg, self.MSE_cv_dB_epoch, self.MSE_train_dB_epoch)
+
+        self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
 
