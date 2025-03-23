@@ -72,8 +72,8 @@ class Pipeline_CPD:
             if SysModel.m == 2: 
                 mask = torch.tensor([True,False])
 
-        # MSE LOSS Function
-        loss_fn = nn.MSELoss(reduction='mean')
+        # BCE LOSS Function
+        loss_fn = nn.BCELoss(reduction='mean')
 
         # Test mode
         self.model.eval()
