@@ -52,9 +52,9 @@ KnownRandInit_train = True # if true: use known random init for training, else: 
 KnownRandInit_cv = True
 KnownRandInit_test = True
 args.use_cuda = True # use GPU or not
-args.n_steps = 4000
+args.n_steps = 70000
 args.n_batch = 10
-args.lr = 1e-4
+args.lr = 1e-3
 args.wd = 1e-4
 
 if args.use_cuda:
@@ -104,7 +104,7 @@ sys_model.InitSequence(m1x_0, m2x_0)# x0 and P0
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
 utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
-[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
+[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD,train_priorX,test_priorX,cv_priorX] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
 
 # Data Generation for KNet training
 sys_model_gen = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
@@ -165,17 +165,18 @@ print("Generate CPD dataset with Known Random Initial State")
 ## Test Neural Network
 print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
 # [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
-KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD,cv_input_CPD,cv_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD,cv_init=cv_init_CPD)
+KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,train_priorX,cv_input_CPD,cv_target_CPD,cv_priorX, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=train_init_CPD,cv_init=cv_init_CPD)
 
 # Load index_error data
 index_error_data = torch.load(path_results_CPD+'/index_error.pt', map_location=device)
 
 # Separate index and error
-index_test = index_error_data['index_test']
-error_test = index_error_data['error_test']
+index_test = index_error_data['index_train']
+error_test = index_error_data['error_train']
 index_cv = index_error_data['index_cv']
 error_cv = index_error_data['error_cv']
 
 
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,error_cv, index_cv, error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,error_cv, index_cv, error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
+[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState)

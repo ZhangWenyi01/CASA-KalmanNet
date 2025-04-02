@@ -40,6 +40,7 @@ class SystemModel:
         self.T_test = T_test
         
         self.changepoint = 0
+        self.prior_x = None
 
         #########################
         ### Covariance Priors ###
@@ -273,6 +274,7 @@ class SystemModel:
         if(randomInit):
             # Allocate Empty Array for Random Initial Conditions
             self.m1x_0_rand = torch.zeros(size, self.m, 1)
+            self.prior_x = torch.zeros(size, self.m, self.T)
             if args.distribution == 'uniform':
                 ### if Uniform Distribution for random init
                 for i in range(size):           
@@ -374,6 +376,8 @@ class SystemModel:
 
                 # Save Current Observation to Trajectory Array
                 self.Input[:, :, t] = torch.squeeze(yt,2)
+                
+                self.prior_x[:, :, t] = torch.squeeze(xt,2)
 
                 ################################
                 ### Save Current to Previous ###

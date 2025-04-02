@@ -53,7 +53,7 @@ class Pipeline_CPD:
         # optimizer which Tensors it should update.
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
 
-    def CPDNNTest(self, SysModel, test_input, test_target, path_results, MaskOnState=False,\
+    def CPDNNTest(self, SysModel, test_input, test_target, path_results,threshold=0.5, MaskOnState=False,\
      randomInit=False,test_init=None,load_model=False,load_model_path=None,\
         test_lengthMask=None):
         # Load model
@@ -65,7 +65,7 @@ class Pipeline_CPD:
         self.N_T = test_input.shape[0]
         SysModel.T_test = test_input.size()[-1]
         self.MSE_test_linear_arr = torch.zeros([self.N_T])
-        x_out_test = torch.zeros([self.N_T, SysModel.m,SysModel.T_test]).to(self.device)
+        x_out_test = torch.zeros([self.N_T, 1,SysModel.T_test-self.sample_interval+1]).to(self.device)
 
         if MaskOnState:
             mask = torch.tensor([True,False,False])
@@ -78,20 +78,34 @@ class Pipeline_CPD:
         # Test mode
         self.model.eval()
         self.model.batch_size = self.N_T
-        # Init Hidden State
-        self.model.init_hidden_KNet()
         torch.no_grad()
 
-        start = time.time()
-
-        if (randomInit):
-            self.model.InitSequence(test_init, SysModel.T_test)               
-        else:
-            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)         
+        start = time.time()       
         
         for t in range(0, SysModel.T_test-self.sample_interval+1):
-            x_out_test[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(test_input[:,:, t:t+self.sample_interval],2)))
+            x_out_test[:,:, t] = self.model(test_input[:,:, t:t+self.sample_interval])
         
+        # for t in range(0, SysModel.T_test-self.sample_interval+1):
+        #     x_out_cv_batch[:, :, t] = self.model(cv_input[:, :, t:t+self.sample_interval])        
+        
+
+        # Randomly select a batch
+        # batch_idx = random.randint(0, self.N_T - 1)
+        batch_idx = 20
+
+        # Plot the predicted trajectory vs actual trajectory
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_out_test[batch_idx, 0, :].detach().cpu().numpy(), label="Predicted Trajectory", linestyle='--')
+        plt.plot(test_target[batch_idx, 0, :].detach().cpu().numpy(), label="Actual Trajectory", linestyle='-')
+        plt.xlabel("Time Steps")
+        plt.ylabel("Value")
+        plt.title(f"Trajectory Comparison for Batch {batch_idx}")
+        plt.legend()
+        plt.grid()
+        plt.show()
+        
+        # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
+        x_out_test_compared = (x_out_test > threshold).float()
         end = time.time()
         t = end - start
 
@@ -262,27 +276,6 @@ class Pipeline_CPD:
             # self.scheduler.step(self.MSE_cv_dB_epoch[ti])
 
             ########################
-            ### Training Summary ###
-            ########################
-            print(ti, "MSE Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE Validation :", self.MSE_cv_dB_epoch[ti],
-                  "[dB]")
-                      
-            if (ti > 1):
-                d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
-                d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
-                print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
-
-            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
-            
-            
-
-            ########################
-            ###      Summary     ###
-            ########################
-            self.writer.add_scalar('Loss/train_dB', self.MSE_train_dB_epoch[ti], ti)
-            self.writer.add_scalar('Loss/validation_dB', self.MSE_cv_dB_epoch[ti], ti)
-
-            ########################
             ### Validation Sequence Batch ###
             ########################
 
@@ -296,17 +289,6 @@ class Pipeline_CPD:
                 # SysModel.T_test = cv_input.size()[-1] # T_test is the maximum length of the CV sequences
 
                 x_out_cv_batch = torch.empty([self.N_CV, 1, SysModel.T_test-self.sample_interval+1]).to(self.device)
-                
-                # # Init Sequence
-                # if(randomInit):
-                #     if(cv_init==None):
-                #         self.model.InitSequence(\
-                #         SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_test)
-                #     else:
-                #         self.model.InitSequence(cv_init, SysModel.T_test)                       
-                # else:
-                #     self.model.InitSequence(\
-                #         SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_test)
 
                 for t in range(0, SysModel.T_test-self.sample_interval+1):
                     x_out_cv_batch[:, :, t] = self.model(cv_input[:, :, t:t+self.sample_interval])
@@ -318,8 +300,8 @@ class Pipeline_CPD:
                         for index in range(self.N_CV):
                             MSE_cv_linear_LOSS[index] = self.loss_fn(x_out_cv_batch[index,mask,cv_lengthMask[index]], cv_target[index,mask,cv_lengthMask[index]])
                         MSE_cvbatch_linear_LOSS = torch.mean(MSE_cv_linear_LOSS)
-                    # else:          
-                        # MSE_cvbatch_linear_LOSS = self.loss_fn(x_out_cv_batch[:,mask,:], cv_target[:,mask,:])
+                    else:          
+                        MSE_cvbatch_linear_LOSS = self.loss_fn(x_out_cv_batch[:,mask,:], cv_target[:,mask,:])
                 else:
                     if self.args.randomLength:
                         for index in range(self.N_CV):
@@ -340,27 +322,23 @@ class Pipeline_CPD:
 
             ########################
             ### Training Summary ###
-            ########################
-            print(ti, "MSE Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE Validation :", self.MSE_cv_dB_epoch[ti],
-                  "[dB]")
+            ########################        
+            print(ti, "MSE Training :", self.MSE_train_linear_epoch[ti], "MSE Validation :", self.MSE_cv_linear_epoch[ti])
                       
             if (ti > 1):
-                d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
-                d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
-                print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
+                d_train = self.MSE_train_linear_epoch[ti] - self.MSE_train_linear_epoch[ti - 1]
+                d_cv = self.MSE_cv_linear_epoch[ti] - self.MSE_cv_linear_epoch[ti - 1]
+                print("diff MSE Training :", d_train,  "diff MSE Validation :", d_cv)
 
-            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
+            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt)
+            
+            ########################
+            ###      Summary     ###
+            ########################
+            self.writer.add_scalar('Loss/train', self.MSE_train_linear_epoch[ti], ti)
+            self.writer.add_scalar('Loss/validation', self.MSE_cv_linear_epoch[ti], ti)
 
         self.writer.close()
 
         return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch, self.MSE_train_linear_epoch, self.MSE_train_dB_epoch]
-    
-    def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
-
-        self.Plot = Plot_extended(self.folderName, self.modelName)
-
-        self.Plot.NNPlot_epochs(self.N_steps, MSE_KF_dB_avg,
-                                self.MSE_test_dB_avg, self.MSE_cv_dB_epoch, self.MSE_train_dB_epoch)
-
-        self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
 
