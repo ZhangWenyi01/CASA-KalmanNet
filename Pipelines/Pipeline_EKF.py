@@ -22,7 +22,6 @@ class Pipeline_EKF:
         self.modelName = modelName
         self.modelFileName = self.folderName + "model_" + self.modelName + ".pt"
         self.PipelineName = self.folderName + "pipeline_" + self.modelName + ".pt"
-        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
 
     def save(self):
         torch.save(self, self.PipelineName)
@@ -58,6 +57,8 @@ class Pipeline_EKF:
         MaskOnState=False, randomInit=False,cv_init=None,train_init=None,\
         train_lengthMask=None,cv_lengthMask=None):
 
+        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
+        
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
 
@@ -331,20 +332,6 @@ class Pipeline_EKF:
                 else:
                     self.MSE_test_linear_arr[j] = loss_fn(x_out_test[j,:,:], test_target[j,:,:]).item()
         
-        # Plot x_out_test vs test_target for the first dimension
-        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
-
-        # Plot x_out_test
-        plt.plot(time_steps, x_out_test[0, 0, :].cpu().detach().numpy(), label='x_out_test', color='red')
-
-        # Plot test_target
-        plt.plot(time_steps, test_target[0, 0, :].cpu().detach().numpy(), label='test_target', color='blue')
-
-        plt.title('2D Curve: x_out_test vs test_target (First Dimension)')
-        plt.xlabel('Time Step')
-        plt.ylabel('Value (Dimension 1)')
-        plt.legend()
-        plt.show()
         
         # Average
         self.MSE_test_linear_avg = torch.mean(self.MSE_test_linear_arr)
@@ -440,21 +427,15 @@ class Pipeline_EKF:
         # Plot x_out_train
         plt.plot(time_steps, x_out_train[random_batch_index, 0, :].cpu().detach().numpy(),
              label='x_out_train', color='red')
-        # # Plot x_out_train_prior
-        # plt.plot(time_steps, x_out_train_prior[random_batch_index, 0, :].cpu().detach().numpy(),
-        #      label='x_out_train_prior', color='green')
         # Plot train_target
         plt.plot(time_steps, train_target[random_batch_index, 0, :].cpu().detach().numpy(),
              label='train_target', color='blue')
-
         # Plot y_train_estimation
         plt.plot(time_steps, y_train_estimation[random_batch_index, 0, :].cpu().detach().numpy(),
              label='y_train_estimation', color='black')
-        
         # Plot y_input
         plt.plot(time_steps, train_input[random_batch_index, 0, :].cpu().detach().numpy(),
              label='y_train_input')
-
         plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
         plt.xlabel('Time Step')
         plt.ylabel('Value (Dimension 1)')

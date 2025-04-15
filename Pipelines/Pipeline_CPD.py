@@ -21,8 +21,7 @@ class Pipeline_CPD:
         self.modelName = modelName
         self.modelFileName = self.folderName + "model_" + self.modelName + ".pt"
         self.PipelineName = self.folderName + "pipeline_" + self.modelName + ".pt"
-        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
-
+        
     def save(self):
         torch.save(self, self.PipelineName)
 
@@ -142,12 +141,11 @@ class Pipeline_CPD:
         MaskOnState=False, randomInit=False,cv_init=None,train_init=None,\
         train_lengthMask=None,cv_lengthMask=None):
 
+        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
-
         self.MSE_cv_linear_epoch = torch.zeros([self.N_steps])
         self.MSE_cv_dB_epoch = torch.zeros([self.N_steps])
-
         self.MSE_train_linear_epoch = torch.zeros([self.N_steps])
         self.MSE_train_dB_epoch = torch.zeros([self.N_steps])
         
@@ -162,12 +160,28 @@ class Pipeline_CPD:
 
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0
+        
+        # Load checkpoint if exists
+        batch = 0
+        resume_train = False
+        if resume_train is True:
+            checkpoint_path = path_results + 'checkpoint.pt'
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.MSE_train_linear_epoch[:len(checkpoint['MSE_train_linear_epoch'])] = checkpoint['MSE_train_linear_epoch']
+            self.MSE_cv_linear_epoch[:len(checkpoint['MSE_cv_linear_epoch'])] = checkpoint['MSE_cv_linear_epoch']
+            self.MSE_train_dB_epoch[:len(checkpoint['MSE_train_dB_epoch'])] = checkpoint['MSE_train_dB_epoch']
+            self.MSE_cv_dB_epoch[:len(checkpoint['MSE_cv_dB_epoch'])] = checkpoint['MSE_cv_dB_epoch']
+            self.MSE_cv_dB_opt = checkpoint['MSE_cv_dB_opt']
+            self.MSE_cv_idx_opt = checkpoint['MSE_cv_idx_opt']
+            batch = checkpoint['Batch']
 
         # Training phase. In the training phase, 5 sequences are taken from the 
         # train_input dataset each time and fed into the model for training. 
         # Then shift one position to the right and take another 5 sequences 
         # for training.
-        for ti in range(0, self.N_steps):
+        for ti in range(batch+1, self.N_steps):
 
             ###############################
             ### Training Sequence Batch ###
@@ -316,7 +330,6 @@ class Pipeline_CPD:
                     
                     torch.save(self.model, path_results + 'best-model.pt')
 
-            ########################
             ### Training Summary ###
             ########################        
             print(ti, "MSE Training :", self.MSE_train_linear_epoch[ti], "MSE Validation :", self.MSE_cv_linear_epoch[ti])
@@ -327,6 +340,25 @@ class Pipeline_CPD:
                 print("diff MSE Training :", d_train,  "diff MSE Validation :", d_cv)
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt)
+            
+            ########################
+            #### Save Checkpoint ###
+            ########################
+            # Save checkpoint
+            checkpoint = {
+                'epoch': ti,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'MSE_train_linear_epoch': self.MSE_train_linear_epoch[:ti+1],
+                'MSE_cv_linear_epoch': self.MSE_cv_linear_epoch[:ti+1],
+                'MSE_train_dB_epoch': self.MSE_train_dB_epoch[:ti+1],
+                'MSE_cv_dB_epoch': self.MSE_cv_dB_epoch[:ti+1],
+                'MSE_cv_dB_opt': self.MSE_cv_dB_opt,
+                'MSE_cv_idx_opt': self.MSE_cv_idx_opt,
+                'Batch': ti
+            }
+            torch.save(checkpoint, path_results + 'checkpoint.pt')
+
             
             ########################
             ###      Summary     ###
