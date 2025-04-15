@@ -16,7 +16,8 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 
 class SystemModel:
 
-    def __init__(self, F, Q, H, R, T, T_test, prior_Q=None, prior_Sigma=None, prior_S=None):
+    def __init__(self, F, Q, H, R, T, T_test, prior_Q=None, prior_Sigma=None, 
+                 prior_S=None,Q_afterCPD=None):
 
         ####################
         ### Motion Model ###
@@ -24,6 +25,10 @@ class SystemModel:
         self.F = F
         self.m = self.F.size()[0]
         self.Q = Q
+        if Q_afterCPD is None:
+            self.Q_afterCPD = self.Q*500
+        else:
+            self.Q_afterCPD = Q_afterCPD
 
         #########################
         ### Observation Model ###
@@ -40,7 +45,6 @@ class SystemModel:
         self.T_test = T_test
         
         self.changepoint = 0
-        self.prior_x = None
 
         #########################
         ### Covariance Priors ###
@@ -323,7 +327,7 @@ class SystemModel:
             xt = self.x_prev
 
             # Generate in a batched manner
-            change_index = torch.randint(20, T, (1,)).item()
+            change_index = torch.randint(20, T-40, (1,)).item()
             print('change_index:', change_index)
             self.changepoint = change_index
             for t in range(0, T):
@@ -341,7 +345,7 @@ class SystemModel:
                     xt = self.f(self.x_prev)
                     mean = torch.zeros([size, self.m])       
                     if t >= change_index:       
-                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q*500)
+                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q_afterCPD)
                     else:
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q)
                     eq = distrib.rsample().view(size,self.m,1)
@@ -376,8 +380,6 @@ class SystemModel:
 
                 # Save Current Observation to Trajectory Array
                 self.Input[:, :, t] = torch.squeeze(yt,2)
-                
-                self.prior_x[:, :, t] = torch.squeeze(xt,2)
 
                 ################################
                 ### Save Current to Previous ###

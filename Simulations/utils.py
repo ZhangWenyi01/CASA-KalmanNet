@@ -57,19 +57,18 @@ def DataGenCPD(args, SysModel_data, fileName):
     SysModel_data.GenerateBatchCPD(args, args.N_E, args.T, randomInit=args.randomInit_train)
     train_input = SysModel_data.Input
     train_target = SysModel_data.Target
-    train_priorX = SysModel_data.prior_x
     ### init conditions ###
     train_init = SysModel_data.m1x_0_batch #size: N_E x m x 1
     ### length mask ###
     if args.randomLength:
         train_lengthMask = SysModel_data.lengthMask
         
-    # changeindex = SysModel_data.changepoint
-    # # Assuming train_input and train_target are tensors with shape [time, features]
-    # time = range(100)
-    # x = time
-    # y_input = torch.squeeze(train_input[0:1,:,:]).numpy()  # Assuming we are plotting the first feature
-    # y_target = torch.squeeze(train_target[0:1,0:1, :]).numpy()  # Assuming we are plotting the first feature
+    changeindex = SysModel_data.changepoint
+    # Assuming train_input and train_target are tensors with shape [time, features]
+    time = range(100)
+    x = time
+    y_input = torch.squeeze(train_input[0:1,:,:]).numpy()  # Assuming we are plotting the first feature
+    y_target = torch.squeeze(train_target[0:1,0:1, :]).numpy()  # Assuming we are plotting the first feature
 
     # # Plot the train_input and train_target
     # plt.figure()
@@ -91,7 +90,6 @@ def DataGenCPD(args, SysModel_data, fileName):
     cv_input = SysModel_data.Input
     cv_target = SysModel_data.Target
     cv_init = SysModel_data.m1x_0_batch #size: N_CV x m x 1
-    cv_priorX = SysModel_data.prior_x
     ### length mask ###
     if args.randomLength:
         cv_lengthMask = SysModel_data.lengthMask
@@ -103,7 +101,6 @@ def DataGenCPD(args, SysModel_data, fileName):
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     test_init = SysModel_data.m1x_0_batch #size: N_T x m x 1
-    test_priorX = SysModel_data.prior_x
     ### length mask ###
     if args.randomLength:
         test_lengthMask = SysModel_data.lengthMask
@@ -112,9 +109,9 @@ def DataGenCPD(args, SysModel_data, fileName):
     ### Save Data ###
     #################
     if(args.randomLength):
-        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init, train_lengthMask,cv_lengthMask,test_lengthMask,train_priorX,test_priorX,cv_priorX], fileName)
+        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init, train_lengthMask,cv_lengthMask,test_lengthMask], fileName)
     else:
-        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init,train_priorX,test_priorX,cv_priorX], fileName)
+        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init], fileName)
         
 
 def DecimateData(all_tensors, t_gen,t_mod, offset=0):

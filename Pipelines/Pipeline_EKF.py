@@ -8,7 +8,10 @@ import torch.nn as nn
 import random
 import time
 from Plot import Plot_extended
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+import os
 
 class Pipeline_EKF:
 
@@ -19,6 +22,7 @@ class Pipeline_EKF:
         self.modelName = modelName
         self.modelFileName = self.folderName + "model_" + self.modelName + ".pt"
         self.PipelineName = self.folderName + "pipeline_" + self.modelName + ".pt"
+        self.writer = SummaryWriter(os.path.join(self.folderName, 'runs'))
 
     def save(self):
         torch.save(self, self.PipelineName)
@@ -89,7 +93,7 @@ class Pipeline_EKF:
 
             # Init Training Batch tensors
             y_training_batch = torch.zeros([self.N_B, SysModel.n, SysModel.T]).to(self.device)
-            train_target_batch = torch.zeros([self.N_B, SysModel.m, SysModel.T-self.sample_interval+1]).to(self.device)
+            train_target_batch = torch.zeros([self.N_B, SysModel.m, SysModel.T]).to(self.device)
             x_out_training_batch = torch.zeros([self.N_B, SysModel.m, SysModel.T]).to(self.device)
             if self.args.randomLength:
                 MSE_train_linear_LOSS = torch.zeros([self.N_B])
@@ -174,9 +178,6 @@ class Pipeline_EKF:
             self.MSE_train_linear_epoch[ti] = MSE_trainbatch_linear_LOSS.item()
             self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
 
-            # Add training loss to TensorBoard
-            self.writer.add_scalar('Loss/train', self.MSE_train_linear_epoch[ti], ti)
-            self.writer.add_scalar('Loss/train_dB', self.MSE_train_dB_epoch[ti], ti)
 
             ##################
             ### Optimizing ###
@@ -248,8 +249,8 @@ class Pipeline_EKF:
                 self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
                 
                 # Add validation loss to TensorBoard
-                self.writer.add_scalar('Loss/validation', self.MSE_cv_linear_epoch[ti], ti)
                 self.writer.add_scalar('Loss/validation_dB', self.MSE_cv_dB_epoch[ti], ti)
+                self.writer.add_scalar('Loss/train_dB', self.MSE_train_dB_epoch[ti], ti)    
                 
                 if (self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt):
                     self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
@@ -267,10 +268,6 @@ class Pipeline_EKF:
                 d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
                 d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
                 print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
-                
-                # Add loss differences to TensorBoard
-                self.writer.add_scalar('Loss/train_diff', d_train, ti)
-                self.writer.add_scalar('Loss/validation_diff', d_cv, ti)
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
@@ -334,6 +331,21 @@ class Pipeline_EKF:
                 else:
                     self.MSE_test_linear_arr[j] = loss_fn(x_out_test[j,:,:], test_target[j,:,:]).item()
         
+        # Plot x_out_test vs test_target for the first dimension
+        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
+
+        # Plot x_out_test
+        plt.plot(time_steps, x_out_test[0, 0, :].cpu().detach().numpy(), label='x_out_test', color='red')
+
+        # Plot test_target
+        plt.plot(time_steps, test_target[0, 0, :].cpu().detach().numpy(), label='test_target', color='blue')
+
+        plt.title('2D Curve: x_out_test vs test_target (First Dimension)')
+        plt.xlabel('Time Step')
+        plt.ylabel('Value (Dimension 1)')
+        plt.legend()
+        plt.show()
+        
         # Average
         self.MSE_test_linear_avg = torch.mean(self.MSE_test_linear_arr)
         self.MSE_test_dB_avg = 10 * torch.log10(self.MSE_test_linear_avg)
@@ -363,7 +375,7 @@ class Pipeline_EKF:
 
         self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
     
-    def CPD_Dataset(self, SysModel,train_input, train_target,train_priorX, cv_input, cv_target,cv_priorX, path_results, path_dataset, MaskOnState=False,\
+    def CPD_Dataset(self, SysModel,train_input, train_target, cv_input, cv_target, path_results, path_dataset, MaskOnState=False,\
         randomInit=False, test_init=None, load_model=False, load_model_path=None,\
             test_lengthMask=None,cv_init=None):
         # Load model
@@ -377,8 +389,12 @@ class Pipeline_EKF:
         SysModel.T_test = train_input.size()[-1]
         SysModel.T_cv = cv_input.size()[-1]
         
-        x_out_train = torch.zeros([self.N_T, SysModel.m, SysModel.T_test]).to(self.device)
-        x_out_cv = torch.zeros([self.N_CV, SysModel.m, SysModel.T_cv]).to(self.device)
+        x_out_train = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        x_out_train_prior = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        x_out_cv = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
+        x_out_cv_prior = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
+        y_train_estimation = torch.zeros([self.N_T, SysModel.n, SysModel.T_test]).to(self.device)
+        y_cv_estimation = torch.zeros([self.N_CV, SysModel.n, SysModel.T_cv]).to(self.device)
 
         if MaskOnState:
             mask = torch.tensor([True,False,False])
@@ -398,7 +414,10 @@ class Pipeline_EKF:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
         
         for t in range(0, SysModel.T_test):
-            x_out_train[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(train_input[:,:, t],2)))
+            output, prior, y = self.model(torch.unsqueeze(train_input[:,:, t],2))
+            x_out_train[:,:, t] = output[:,0,:]
+            x_out_train_prior[:,:, t] = prior[:,0,:]
+            y_train_estimation[:,:, t] = torch.squeeze(y, dim=2)
 
         # Process cv data
         self.model.batch_size = self.N_CV
@@ -409,73 +428,79 @@ class Pipeline_EKF:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_cv)
         
         for t in range(0, SysModel.T_cv):
-            x_out_cv[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(cv_input[:,:, t],2)))
+            output, prior,y= self.model(torch.unsqueeze(cv_input[:,:, t],2))
+            x_out_cv[:,:, t] = output[:,0,:]
+            x_out_cv_prior[:,:, t] = prior[:,0,:]
+            y_cv_estimation[:,:, t] = torch.squeeze(y,dim=2)
 
-        # Calculate error and index
-        error_train = torch.mean(torch.abs(x_out_train - train_target), dim=1, keepdim=True)
-        error_cv = torch.mean(torch.abs(x_out_cv - cv_target), dim=1, keepdim=True)
-        error_train_prior = torch.mean(torch.abs(x_out_train - train_priorX), dim=1, keepdim=True)
-        error_cv_prior = torch.mean(torch.abs(x_out_cv - cv_priorX), dim=1, keepdim=True)
+        # Randomly select a batch
+        random_batch_index = random.randint(0, self.N_T - 1)
+        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
 
-        # Normalize along the 3rd dimension with max=3 and min=0
-        # Normalize along the 3rd dimension with max=3 and min=0
-        error_train = (error_train - torch.min(error_train, dim=2, keepdim=True)[0]) / \
-             (torch.max(error_train, dim=2, keepdim=True)[0] - torch.min(error_train, dim=2, keepdim=True)[0]) * 4
-        error_cv = (error_cv - torch.min(error_cv, dim=2, keepdim=True)[0]) / \
-               (torch.max(error_cv, dim=2, keepdim=True)[0] - torch.min(error_cv, dim=2, keepdim=True)[0]) * 4
-        tanh_index_test = torch.tanh(error_train)
-        tanh_index_cv = torch.tanh(error_cv)
+        # Plot x_out_train
+        plt.plot(time_steps, x_out_train[random_batch_index, 0, :].cpu().detach().numpy(),
+             label='x_out_train', color='red')
+        # # Plot x_out_train_prior
+        # plt.plot(time_steps, x_out_train_prior[random_batch_index, 0, :].cpu().detach().numpy(),
+        #      label='x_out_train_prior', color='green')
+        # Plot train_target
+        plt.plot(time_steps, train_target[random_batch_index, 0, :].cpu().detach().numpy(),
+             label='train_target', color='blue')
+
+        # Plot y_train_estimation
+        plt.plot(time_steps, y_train_estimation[random_batch_index, 0, :].cpu().detach().numpy(),
+             label='y_train_estimation', color='black')
         
-        error_train_prior = (error_train_prior - torch.min(error_train_prior, dim=2, keepdim=True)[0]) / \
-             (torch.max(error_train_prior, dim=2, keepdim=True)[0] - torch.min(error_train_prior, dim=2, keepdim=True)[0]) * 4
-        error_cv_prior = (error_cv_prior - torch.min(error_cv_prior, dim=2, keepdim=True)[0]) / \
-               (torch.max(error_cv_prior, dim=2, keepdim=True)[0] - torch.min(error_cv_prior, dim=2, keepdim=True)[0]) * 4
-        
+        # Plot y_input
+        plt.plot(time_steps, train_input[random_batch_index, 0, :].cpu().detach().numpy(),
+             label='y_train_input')
 
-        # # Select a batch from the normalized error_test
-        # batch_index = random.randint(0, 99)  # Select a random batch index within the range [0, 99]
-        # selected_batch = error_test[batch_index, 0, :].cpu().detach().numpy()
-
-        # # Create a figure with two subplots side by side
-        # fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-
-        # # Plot the selected batch as a line plot on the left
-        # axes[0].plot(selected_batch, alpha=0.7, color='blue')
-        # axes[0].set_title(f'Line Plot of Batch {batch_index}')
-        # axes[0].set_xlabel('Time')
-        # axes[0].set_ylabel('Value')
-        # axes[0].grid(True)
-
-        # # Plot the Tanh Index of the selected batch on the right
-        # axes[1].plot(tanh_index_test[batch_index, 0, :].cpu().detach().numpy())
-        # axes[1].set_title(f'Tanh Index of Batch {batch_index}')
-        # axes[1].set_xlabel('Time')
-        # axes[1].set_ylabel('Value')
-        # axes[1].grid(True)
-
-        # # Adjust layout and show the figure
-        # plt.tight_layout()
-        # plt.show()
+        plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
+        plt.xlabel('Time Step')
+        plt.ylabel('Value (Dimension 1)')
+        plt.legend()
+        plt.show()
         
-        # Calculate MSE
-        sample_interval = self.sample_interval
-        tanh_index_sample_test = torch.zeros((tanh_index_test.size(0), tanh_index_test.size(1), tanh_index_test.size(2) - sample_interval+1))
-        tanh_index_sample_cv = torch.zeros((tanh_index_cv.size(0), tanh_index_cv.size(1), tanh_index_cv.size(2) - sample_interval+1))
-        
-        for i in range(tanh_index_test.size(2) - sample_interval+1):
-            mse_test = torch.mean((tanh_index_test[:, :, i:i+sample_interval]) ** 2, dim=2)
-            tanh_index_sample_test[:, :, i] = mse_test
-        
-        for i in range(tanh_index_cv.size(2) - sample_interval+1):
-            mse_cv = torch.mean((tanh_index_cv[:, :, i:i+sample_interval]) ** 2, dim=2)
-            tanh_index_sample_cv[:, :, i] = mse_cv
-        
+        # Calculate absolute errors
+        train_target = torch.mean(torch.abs(x_out_train - train_target), dim=1, keepdim=True)
+        train_input = torch.mean(torch.abs(y_train_estimation - train_input), dim=1, keepdim=True)
+        cv_target = torch.mean(torch.abs(x_out_cv - cv_target), dim=1, keepdim=True)
+        cv_input = torch.mean(torch.abs(y_cv_estimation - cv_input), dim=1, keepdim=True)
+
+        # Normalize errors to range [0, 4]
+        def normalize_error(error):
+            min_val = torch.min(error, dim=2, keepdim=True)[0]
+            max_val = torch.max(error, dim=2, keepdim=True)[0]
+            return (error - min_val) / (max_val - min_val) * 4
+
+        train_target = normalize_error(train_target)
+        train_input = normalize_error(train_input)
+        cv_target = normalize_error(cv_target)
+        cv_input = normalize_error(cv_input)
+
+        # Apply tanh transformation
+        train_target = torch.tanh(train_target)
+        # train_input = torch.tanh(train_input)
+        cv_target = torch.tanh(cv_target)
+        # cv_input = torch.tanh(cv_input)
+
+        # Calculate MSE over sample intervals
+        def calculate_mse_over_intervals(tanh_index, sample_interval):
+            num_intervals = tanh_index.size(2) - sample_interval + 1
+            mse_result = torch.zeros((tanh_index.size(0), tanh_index.size(1), num_intervals))
+            for i in range(num_intervals):
+                mse_result[:, :, i] = torch.mean((tanh_index[:, :, i:i + sample_interval]) ** 2, dim=2)
+            return mse_result
+
+        train_target = calculate_mse_over_intervals(train_target, self.sample_interval)
+        cv_target = calculate_mse_over_intervals(cv_target, self.sample_interval)
+
         # Save results
         torch.save({
-            'index_train': tanh_index_sample_test, 
-            'error_train': error_train_prior, 
-            'index_cv': tanh_index_sample_cv, 
-            'error_cv': error_cv_prior
+            'train_input': train_input,
+            'train_target': train_target,
+            'cv_input': cv_input,
+            'cv_target': cv_target
         }, path_dataset + 'index_error.pt')
  
 

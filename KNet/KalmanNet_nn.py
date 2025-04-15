@@ -195,7 +195,8 @@ class KalmanNetNN(torch.nn.Module):
         self.y_previous = y
 
         # return
-        return self.m1x_posterior
+        return self.m1x_posterior,self.m1x_prior,self.m1y
+        # return self.m1x_posterior
 
     ########################
     ### Kalman Gain Step ###

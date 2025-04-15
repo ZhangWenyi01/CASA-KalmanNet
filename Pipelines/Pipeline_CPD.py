@@ -85,10 +85,6 @@ class Pipeline_CPD:
         for t in range(0, SysModel.T_test-self.sample_interval+1):
             x_out_test[:,:, t] = self.model(test_input[:,:, t:t+self.sample_interval])
         
-        # for t in range(0, SysModel.T_test-self.sample_interval+1):
-        #     x_out_cv_batch[:, :, t] = self.model(cv_input[:, :, t:t+self.sample_interval])        
-        
-
         # Randomly select a batch
         # batch_idx = random.randint(0, self.N_T - 1)
         batch_idx = 20

@@ -6,7 +6,7 @@ import Simulations.config as config
 import Simulations.utils as utils
 from Simulations.Linear_CPD.parameters import F_gen,F_CV,H_identity,H_onlyPos,\
    Q_gen,Q_CV,R_3,R_2,R_onlyPos,\
-   m,m_cv
+   m,m_cv,Q_afterCPD
 
 from Filters.KalmanFilter_test import KFTest
 
@@ -52,9 +52,9 @@ KnownRandInit_train = True # if true: use known random init for training, else: 
 KnownRandInit_cv = True
 KnownRandInit_test = True
 args.use_cuda = True # use GPU or not
-args.n_steps = 70000
-args.n_batch = 10
-args.lr = 1e-3
+args.n_steps = 50000
+args.n_batch = 64
+args.lr = 1e-4
 args.wd = 1e-4
 
 if args.use_cuda:
@@ -96,16 +96,6 @@ CPDDatafileName = 'CPD.pt'
 DatafolderName = 'Simulations/Linear_CA/data/'
 DatafileName = 'decimated_dt1e-2_T100_r0_randnInit.pt'
 
-# System Model for KNet training
-sys_model = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
-sys_model.InitSequence(m1x_0, m2x_0)# x0 and P0
-
-# Data Generation for CPD
-sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
-sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
-utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
-[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD,train_priorX,test_priorX,cv_priorX] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
-
 # Data Generation for KNet training
 sys_model_gen = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
 sys_model_gen.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
@@ -124,7 +114,9 @@ print("cvset observation y size:",cv_input.size())
 
 print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
 
-
+# System Model for KNet training
+sys_model = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
+sys_model.InitSequence(m1x_0, m2x_0)# x0 and P0
 ##########################
 ### Evaluate KalmanNet ###
 ##########################
@@ -138,19 +130,6 @@ KNet_Pipeline.setssModel(sys_model)
 KNet_Pipeline.setModel(KNet_model)
 KNet_Pipeline.setTrainingParams(args)
 
-# Build Neural Network
-CPDNet_model = CPDNetNN(args.sample_interval, 1, 1, 1)
-print("Number of trainable parameters for CPDNet pass 1:",sum(p.numel() for p in KNet_model.parameters() if p.requires_grad))
-## Train Neural Network
-CPD_Pipeline = Pipeline_CPD(strTime, "CPDNet", "CPDNet")
-CPD_Pipeline.setModel(CPDNet_model)
-CPD_Pipeline.setssModel(sys_model_CPD)
-CPD_Pipeline.setTrainingParams(args)
-
-
-
-
-
 # if (KnownRandInit_train):
 #    print("Train KNet with Known Random Initial State")
 #    print("Train Loss on All States (if false, loss on position only):", Train_Loss_On_AllState)
@@ -160,23 +139,50 @@ CPD_Pipeline.setTrainingParams(args)
 #    print("Train Loss on All States (if false, loss on position only):", Train_Loss_On_AllState)
 #    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = KNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results, MaskOnState=not Train_Loss_On_AllState)
 
+# if (KnownRandInit_test): 
+#    print("Test KNet with Known Random Initial State")
+#    ## Test Neural Network
+#    print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
+#    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime] = KNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init)
+# else: 
+#    print("Test KNet with Unknown Initial State")
+#    ## Test Neural Network
+#    print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
+#    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime] = KNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results,MaskOnState=not Loss_On_AllState)
+
+######################################### CPDNet #########################################
+# This data will be passed to a fully trained KalmanNet
+# and used to generate CPD dataset for training CPDNet. Change point inclued in 
+# the dataset.
+sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
+                            args.T_test,Q_afterCPD=Q_gen*500)
+sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
+utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
+[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
+
+# Build Neural Network
+CPDNet_model = CPDNetNN(args.sample_interval, 1, 1, 1)
+print("Number of trainable parameters for CPDNet pass 1:",sum(p.numel() for p in CPDNet_model.parameters() if p.requires_grad))
+## Train Neural Network
+CPD_Pipeline = Pipeline_CPD(strTime, "CPDNet", "CPDNet")
+CPD_Pipeline.setModel(CPDNet_model)
+CPD_Pipeline.setssModel(sys_model_CPD)
+CPD_Pipeline.setTrainingParams(args)
 
 print("Generate CPD dataset with Known Random Initial State")
 ## Test Neural Network
 print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
 # [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
-KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,train_priorX,cv_input_CPD,cv_target_CPD,cv_priorX, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=train_init_CPD,cv_init=cv_init_CPD)
+KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,cv_input_CPD,cv_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=train_init_CPD,cv_init=cv_init_CPD)
 
 # Load index_error data
 index_error_data = torch.load(path_results_CPD+'/index_error.pt', map_location=device)
 
 # Separate index and error
-index_test = index_error_data['index_train']
-error_test = index_error_data['error_train']
-index_cv = index_error_data['index_cv']
-error_cv = index_error_data['error_cv']
+train_input = index_error_data['train_input']
+train_target = index_error_data['train_target']
+cv_input = index_error_data['cv_input']
+cv_target = index_error_data['cv_target']
 
-
-
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,error_cv, index_cv, error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
-[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,error_test, index_test, path_results_CPD, MaskOnState=not Train_Loss_On_AllState)
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
+# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,cv_input, cv_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState)

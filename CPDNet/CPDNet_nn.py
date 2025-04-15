@@ -5,24 +5,28 @@ import torch.nn as nn
 import torch.nn.functional as func
 
 
-
 class CPDNetNN(nn.Module):
-    def __init__(self, sample_interval, hidden_size, num_layers, output_size):
+    def __init__(self, sample_interval, hidden_size, num_layers, output_size, dropout_prob=0.3):
         super(CPDNetNN, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.sample_interval = sample_interval
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # LSTM layer
+        # LSTM1 layer
         self.lstm = nn.LSTM(1, hidden_size, num_layers, batch_first=True)
+        # LSTM2 layer
+        self.lstm2 = nn.LSTM(1, hidden_size, num_layers, batch_first=True)
         
         # Fully connected layer
         self.fc = nn.Linear(hidden_size, output_size)
+        # Fully connected layer1
+        self.fc1 = nn.Linear(hidden_size, output_size)
         
         # Additional layers
         self.activation = nn.ReLU()
         self.normalization = nn.BatchNorm1d(hidden_size)
+        self.dropout = nn.Dropout(p=dropout_prob)  # Dropout layer
         
         # Move all layers to device
         self.to(self.device)
@@ -42,12 +46,12 @@ class CPDNetNN(nn.Module):
         # Apply batch normalization (before activation)
         out = self.normalization(out.transpose(1, 2)).transpose(1, 2)
         
-        # Apply activation
-        out = self.activation(out)
-        
         # Get final output - no need to reshape
         out = self.fc(out)
 
+        # Apply activation
+        out = self.activation(out)
+
         # Add sigmoid activation to ensure output values are between 0 and 1
-        out = torch.sigmoid(out)
+        out = torch.tanh(out)
         return out[:, -1, :]
