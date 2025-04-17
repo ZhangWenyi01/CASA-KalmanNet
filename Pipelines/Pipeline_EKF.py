@@ -362,7 +362,7 @@ class Pipeline_EKF:
 
         self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
     
-    def CPD_Dataset(self, SysModel,train_input, train_target, cv_input, cv_target, path_results, path_dataset, MaskOnState=False,\
+    def CPD_Dataset(self, SysModel,train_input, train_target, cv_input, cv_target,test_input,test_target, path_results, path_dataset, MaskOnState=False,\
         randomInit=False, test_init=None, load_model=False, load_model_path=None,\
             test_lengthMask=None,cv_init=None):
         # Load model
@@ -378,10 +378,18 @@ class Pipeline_EKF:
         
         x_out_train = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
         x_out_train_prior = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        
         x_out_cv = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
         x_out_cv_prior = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
+        
+        x_out_test = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        x_out_test_prior = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        
         y_train_estimation = torch.zeros([self.N_T, SysModel.n, SysModel.T_test]).to(self.device)
+        
         y_cv_estimation = torch.zeros([self.N_CV, SysModel.n, SysModel.T_cv]).to(self.device)
+        
+        y_test_estimation = torch.zeros([self.N_T, SysModel.n, SysModel.T_test]).to(self.device)
 
         if MaskOnState:
             mask = torch.tensor([True,False,False])
@@ -405,7 +413,30 @@ class Pipeline_EKF:
             x_out_train[:,:, t] = output[:,0,:]
             x_out_train_prior[:,:, t] = prior[:,0,:]
             y_train_estimation[:,:, t] = torch.squeeze(y, dim=2)
-
+            
+        # # Plot 2D curves for x_out_train_prior, x_out_train, train_input, and train_target
+        # time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
+        # i=20
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(time_steps, x_out_train_prior[i, 0, :].cpu().detach().numpy(),
+        #         label='x_out_train_prior', linestyle='--', color='orange')
+        # plt.plot(time_steps, x_out_train[i, 0, :].cpu().detach().numpy(),
+        #         label='x_out_train', color='red')
+        # plt.plot(time_steps, train_target[i, 0, :].cpu().detach().numpy(),
+        #         label='train_target', color='blue')
+        # plt.plot(time_steps, train_input[i, 0, :].cpu().detach().numpy(),
+        #         label='train_input', color='green')
+        # plt.title(f'2D Curve for Batch {i}')
+        # plt.xlabel('Time Step')
+        # plt.ylabel('Value (Dimension 1)')
+        # plt.legend()
+        # plt.grid()
+        # plt.show()
+        train_input_plt = train_input
+        train_target_plt = train_target
+        cv_input_plt = cv_input
+        cv_target_plt = cv_target
+        
         # Process cv data
         self.model.batch_size = self.N_CV
         self.model.init_hidden_KNet()  # Reset hidden state
@@ -413,58 +444,56 @@ class Pipeline_EKF:
             self.model.InitSequence(cv_init, SysModel.T_cv)               
         else:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_cv)
-        
         for t in range(0, SysModel.T_cv):
             output, prior,y= self.model(torch.unsqueeze(cv_input[:,:, t],2))
             x_out_cv[:,:, t] = output[:,0,:]
             x_out_cv_prior[:,:, t] = prior[:,0,:]
             y_cv_estimation[:,:, t] = torch.squeeze(y,dim=2)
+            
+        # Process test data
+        self.model.batch_size = self.N_T
+        self.model.init_hidden_KNet()  # Reset hidden state
+        if (randomInit):
+            self.model.InitSequence(test_init, SysModel.T_test)
+        else:
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
+        for t in range(0, SysModel.T_test):
+            output, prior,y= self.model(torch.unsqueeze(test_input[:,:, t],2))
+            x_out_test[:,:, t] = output[:,0,:]
+            x_out_test_prior[:,:, t] = prior[:,0,:]
+            y_test_estimation[:,:, t] = torch.squeeze(y,dim=2)
 
-        # Randomly select a batch
-        random_batch_index = random.randint(0, self.N_T - 1)
-        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
 
-        # Plot x_out_train
-        plt.plot(time_steps, x_out_train[random_batch_index, 0, :].cpu().detach().numpy(),
-             label='x_out_train', color='red')
-        # Plot train_target
-        plt.plot(time_steps, train_target[random_batch_index, 0, :].cpu().detach().numpy(),
-             label='train_target', color='blue')
-        # Plot y_train_estimation
-        plt.plot(time_steps, y_train_estimation[random_batch_index, 0, :].cpu().detach().numpy(),
-             label='y_train_estimation', color='black')
-        # Plot y_input
-        plt.plot(time_steps, train_input[random_batch_index, 0, :].cpu().detach().numpy(),
-             label='y_train_input')
-        plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
-        plt.xlabel('Time Step')
-        plt.ylabel('Value (Dimension 1)')
-        plt.legend()
-        plt.show()
-        
         # Calculate absolute errors
-        train_target = torch.mean(torch.abs(x_out_train - train_target), dim=1, keepdim=True)
-        train_input = torch.mean(torch.abs(y_train_estimation - train_input), dim=1, keepdim=True)
-        cv_target = torch.mean(torch.abs(x_out_cv - cv_target), dim=1, keepdim=True)
-        cv_input = torch.mean(torch.abs(y_cv_estimation - cv_input), dim=1, keepdim=True)
+        train_target = torch.abs(x_out_train[:,0:1,:] - train_target[:,0:1,:])
+        train_input = torch.abs(y_train_estimation - train_input)
+        cv_target = torch.abs(x_out_cv[:,0:1,:] - cv_target[:,0:1,:])
+        cv_input = torch.abs(y_cv_estimation - cv_input)
+        test_target = torch.abs(x_out_test[:,0:1,:] - test_target[:,0:1,:])
+        test_input = torch.abs(y_test_estimation - test_input)
 
-        # Normalize errors to range [0, 4]
-        def normalize_error(error):
-            min_val = torch.min(error, dim=2, keepdim=True)[0]
-            max_val = torch.max(error, dim=2, keepdim=True)[0]
-            return (error - min_val) / (max_val - min_val) * 4
+        # # Normalize errors to range [0, 4]
+        # def normalize_error(error):
+        #     min_val = torch.min(error, dim=2, keepdim=True)[0]
+        #     max_val = torch.max(error, dim=2, keepdim=True)[0]
+        #     return (error - min_val) / (max_val - min_val) * 2
 
-        train_target = normalize_error(train_target)
-        train_input = normalize_error(train_input)
-        cv_target = normalize_error(cv_target)
-        cv_input = normalize_error(cv_input)
+        train_target = torch.sigmoid(train_target)-0.5
+        train_input = torch.sigmoid(train_input)-0.5
+        cv_target = torch.sigmoid(cv_target)-0.5
+        cv_input = torch.sigmoid(cv_input)-0.5
+        test_target = torch.sigmoid(test_target)-0.5
+        test_input = torch.sigmoid(test_input)-0.5
+        
 
         # Apply tanh transformation
-        train_target = torch.tanh(train_target)
-        # train_input = torch.tanh(train_input)
-        cv_target = torch.tanh(cv_target)
-        # cv_input = torch.tanh(cv_input)
-
+        train_target = torch.tanh(15*train_target)
+        train_input = torch.tanh(15*train_input)
+        cv_target = torch.tanh(15*cv_target)
+        cv_input = torch.tanh(15*cv_input)   
+        test_target = torch.tanh(15*test_target)
+        test_input = torch.tanh(15*test_input)
+        
         # Calculate MSE over sample intervals
         def calculate_mse_over_intervals(tanh_index, sample_interval):
             num_intervals = tanh_index.size(2) - sample_interval + 1
@@ -475,13 +504,49 @@ class Pipeline_EKF:
 
         train_target = calculate_mse_over_intervals(train_target, self.sample_interval)
         cv_target = calculate_mse_over_intervals(cv_target, self.sample_interval)
+        train_input = calculate_mse_over_intervals(train_input, self.sample_interval)
+        cv_input = calculate_mse_over_intervals(cv_input, self.sample_interval)
+        test_target = calculate_mse_over_intervals(test_target, self.sample_interval)
+        test_input = calculate_mse_over_intervals(test_input, self.sample_interval)
+        
+        # time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
+        # for i in range(train_input.size(0)):
+        #     plt.figure(figsize=(10, 4))
+        #     plt.subplot(1, 2, 1)
+        #     plt.plot(train_input[i, 0, :].cpu().detach().numpy(), label="Train Input")
+        #     plt.plot(train_target[i, 0, :].cpu().detach().numpy(), label="Train Target")
+        #     plt.title(f"Batch {i}")
+        #     plt.xlabel("Length")
+        #     plt.ylabel("Value")
+        #     plt.legend()
+            
+        #     plt.subplot(1, 2, 2)
+        #     plt.plot(time_steps, x_out_train[i, 0, :].cpu().detach().numpy(),
+        #         label='x_out_train', color='red')
+        #     plt.plot(time_steps, train_target_plt[i, 0, :].cpu().detach().numpy(),
+        #         label='train_target', color='blue')
+        #     plt.plot(time_steps, y_train_estimation[i, 0, :].cpu().detach().numpy(),
+        #         label='y_train_estimation', color='black')
+        #     plt.plot(time_steps, train_input_plt[i, 0, :].cpu().detach().numpy(),
+        #         label='y_train_input')
+        #     plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
+        #     plt.xlabel('Time Step')
+        #     plt.ylabel('Value (Dimension 1)')
+        #     plt.legend()
+        #     plt.show()
 
         # Save results
         torch.save({
             'train_input': train_input,
             'train_target': train_target,
             'cv_input': cv_input,
-            'cv_target': cv_target
+            'cv_target': cv_target,
+            'test_input': test_input,
+            'test_target': test_target,
+            'x_estimation_cv': x_out_cv,
+            'x_ture_cv': cv_target_plt,
+            'y_estimation_cv': y_cv_estimation,
+            'y_ture_cv': cv_input_plt
         }, path_dataset + 'index_error.pt')
  
 

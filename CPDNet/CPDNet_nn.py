@@ -38,7 +38,8 @@ class CPDNetNN(nn.Module):
         c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(x.device)
         
         # Reshape input to (batch_size, sequence_length, input_size)
-        x = x.view(batch_size, self.sample_interval, 1)
+        x = x.permute(0, 2, 1)
+        # x = x.view(batch_size, self.sample_interval, 1)
         
         # LSTM forward pass
         out, _ = self.lstm(x, (h0, c0))

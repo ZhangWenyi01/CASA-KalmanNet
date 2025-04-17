@@ -52,7 +52,8 @@ class Pipeline_CPD:
         # optimizer which Tensors it should update.
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
 
-    def CPDNNTest(self, SysModel, test_input, test_target, path_results,threshold=0.5, MaskOnState=False,\
+    def CPDNNTest(self, SysModel, test_input, test_target, path_results,x_estimation_cv,x_ture_cv,
+                  y_estimation_cv,y_ture_cv,threshold=0.5,MaskOnState=False,\
      randomInit=False,test_init=None,load_model=False,load_model_path=None,\
         test_lengthMask=None):
         # Load model
@@ -61,6 +62,7 @@ class Pipeline_CPD:
         else:
             self.model = torch.load(path_results+'best-model.pt', map_location=self.device,weights_only=False) 
 
+        changepoint = SysModel.changepoint
         self.N_T = test_input.shape[0]
         SysModel.T_test = test_input.size()[-1]
         self.MSE_test_linear_arr = torch.zeros([self.N_T])
@@ -89,14 +91,31 @@ class Pipeline_CPD:
         batch_idx = 20
 
         # Plot the predicted trajectory vs actual trajectory
-        plt.figure(figsize=(10, 6))
+        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
+        plt.subplot(1, 2, 1)
         plt.plot(x_out_test[batch_idx, 0, :].detach().cpu().numpy(), label="Predicted Trajectory", linestyle='--')
         plt.plot(test_target[batch_idx, 0, :].detach().cpu().numpy(), label="Actual Trajectory", linestyle='-')
+        plt.axvline(x=changepoint, color='green', linestyle='--', label=f'Changepoint ({changepoint})')
         plt.xlabel("Time Steps")
         plt.ylabel("Value")
         plt.title(f"Trajectory Comparison for Batch {batch_idx}")
         plt.legend()
         plt.grid()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(x_estimation_cv[batch_idx, 0, :].cpu().detach().numpy(),
+            label='estimation state', color='red')
+        plt.plot(x_ture_cv[batch_idx, 0, :].cpu().detach().numpy(),
+            label='true state', color='blue')
+        plt.plot(y_estimation_cv[batch_idx, 0, :].cpu().detach().numpy(),
+            label='estimation y', color='black')
+        plt.plot(y_ture_cv[batch_idx, 0, :].cpu().detach().numpy(),
+            label='true y')
+        plt.axvline(x=changepoint, color='green', linestyle='--', label=f'Changepoint ({changepoint})')
+        plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
+        plt.xlabel('Time Step')
+        plt.ylabel('Value (Dimension 1)')
+        plt.legend()
         plt.show()
         
         # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
@@ -162,7 +181,7 @@ class Pipeline_CPD:
         self.MSE_cv_idx_opt = 0
         
         # Load checkpoint if exists
-        batch = 0
+        batch = -1
         resume_train = False
         if resume_train is True:
             checkpoint_path = path_results + 'checkpoint.pt'
@@ -192,7 +211,7 @@ class Pipeline_CPD:
             self.model.batch_size = self.N_B
 
             # Init Training Batch tensors
-            y_training_batch = torch.zeros([self.N_B, SysModel.n, SysModel.T]).to(self.device)
+            y_training_batch = torch.zeros([self.N_B, SysModel.n, SysModel.T-self.sample_interval+1]).to(self.device)
             train_target_batch = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
             x_out_training_batch = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
             if self.args.randomLength:
