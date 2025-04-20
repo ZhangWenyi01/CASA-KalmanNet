@@ -363,7 +363,7 @@ class Pipeline_EKF:
         self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
     
     def CPD_Dataset(self, SysModel,train_input, train_target, cv_input, cv_target,test_input,test_target, path_results, path_dataset, MaskOnState=False,\
-        randomInit=False, test_init=None, load_model=False, load_model_path=None,\
+        randomInit=False,train_init=None, test_init=None, load_model=False, load_model_path=None,\
             test_lengthMask=None,cv_init=None):
         # Load model
         if load_model:
@@ -399,12 +399,19 @@ class Pipeline_EKF:
         # Test mode
         self.model.eval()
         torch.no_grad()
+        
+        train_input_plt = train_input
+        train_target_plt = train_target
+        cv_input_plt = cv_input
+        cv_target_plt = cv_target
+        test_input_plt = test_input
+        test_target_plt = test_target
 
-        # Process test data
+        # Process train data
         self.model.batch_size = self.N_T
         self.model.init_hidden_KNet()  # Reset hidden state
         if (randomInit):
-            self.model.InitSequence(test_init, SysModel.T_test)               
+            self.model.InitSequence(train_init, SysModel.T_test)               
         else:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
         
@@ -413,29 +420,6 @@ class Pipeline_EKF:
             x_out_train[:,:, t] = output[:,0,:]
             x_out_train_prior[:,:, t] = prior[:,0,:]
             y_train_estimation[:,:, t] = torch.squeeze(y, dim=2)
-            
-        # # Plot 2D curves for x_out_train_prior, x_out_train, train_input, and train_target
-        # time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
-        # i=20
-        # plt.figure(figsize=(10, 6))
-        # plt.plot(time_steps, x_out_train_prior[i, 0, :].cpu().detach().numpy(),
-        #         label='x_out_train_prior', linestyle='--', color='orange')
-        # plt.plot(time_steps, x_out_train[i, 0, :].cpu().detach().numpy(),
-        #         label='x_out_train', color='red')
-        # plt.plot(time_steps, train_target[i, 0, :].cpu().detach().numpy(),
-        #         label='train_target', color='blue')
-        # plt.plot(time_steps, train_input[i, 0, :].cpu().detach().numpy(),
-        #         label='train_input', color='green')
-        # plt.title(f'2D Curve for Batch {i}')
-        # plt.xlabel('Time Step')
-        # plt.ylabel('Value (Dimension 1)')
-        # plt.legend()
-        # plt.grid()
-        # plt.show()
-        train_input_plt = train_input
-        train_target_plt = train_target
-        cv_input_plt = cv_input
-        cv_target_plt = cv_target
         
         # Process cv data
         self.model.batch_size = self.N_CV
@@ -463,7 +447,6 @@ class Pipeline_EKF:
             x_out_test_prior[:,:, t] = prior[:,0,:]
             y_test_estimation[:,:, t] = torch.squeeze(y,dim=2)
 
-
         # Calculate absolute errors
         train_target = torch.abs(x_out_train[:,0:1,:] - train_target[:,0:1,:])
         train_input = torch.abs(y_train_estimation - train_input)
@@ -472,11 +455,11 @@ class Pipeline_EKF:
         test_target = torch.abs(x_out_test[:,0:1,:] - test_target[:,0:1,:])
         test_input = torch.abs(y_test_estimation - test_input)
 
-        # # Normalize errors to range [0, 4]
-        # def normalize_error(error):
-        #     min_val = torch.min(error, dim=2, keepdim=True)[0]
-        #     max_val = torch.max(error, dim=2, keepdim=True)[0]
-        #     return (error - min_val) / (max_val - min_val) * 2
+        # Normalize errors to range [0, 4]
+        def normalize_error(error):
+            min_val = torch.min(error, dim=2, keepdim=True)[0]
+            max_val = torch.max(error, dim=2, keepdim=True)[0]
+            return (error - min_val) / (max_val - min_val) * 2
 
         train_target = torch.sigmoid(train_target)-0.5
         train_input = torch.sigmoid(train_input)-0.5
@@ -509,6 +492,8 @@ class Pipeline_EKF:
         test_target = calculate_mse_over_intervals(test_target, self.sample_interval)
         test_input = calculate_mse_over_intervals(test_input, self.sample_interval)
         
+        
+        # # Plot
         # time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
         # for i in range(train_input.size(0)):
         #     plt.figure(figsize=(10, 4))
@@ -534,6 +519,25 @@ class Pipeline_EKF:
         #     plt.ylabel('Value (Dimension 1)')
         #     plt.legend()
         #     plt.show()
+        
+        # # Plot 2D curves for x_out_train_prior, x_out_train, train_input, and train_target
+        # time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
+        # i=20
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(time_steps, x_out_train_prior[i, 0, :].cpu().detach().numpy(),
+        #         label='x_out_train_prior', linestyle='--', color='orange')
+        # plt.plot(time_steps, x_out_train[i, 0, :].cpu().detach().numpy(),
+        #         label='x_out_train', color='red')
+        # plt.plot(time_steps, train_target_plt[i, 0, :].cpu().detach().numpy(),
+        #         label='train_target', color='blue')
+        # plt.plot(time_steps, train_input_plt[i, 0, :].cpu().detach().numpy(),
+        #         label='train_input', color='green')
+        # plt.title(f'2D Curve for Batch {i}')
+        # plt.xlabel('Time Step')
+        # plt.ylabel('Value (Dimension 1)')
+        # plt.legend()
+        # plt.grid()
+        # plt.show()
 
         # Save results
         torch.save({
@@ -543,10 +547,10 @@ class Pipeline_EKF:
             'cv_target': cv_target,
             'test_input': test_input,
             'test_target': test_target,
-            'x_estimation_cv': x_out_cv,
-            'x_ture_cv': cv_target_plt,
-            'y_estimation_cv': y_cv_estimation,
-            'y_ture_cv': cv_input_plt
+            'x_estimation_test': x_out_test,
+            'x_ture_test': test_target_plt,
+            'y_estimation_test': y_test_estimation,
+            'y_ture_test': test_input_plt
         }, path_dataset + 'index_error.pt')
  
 

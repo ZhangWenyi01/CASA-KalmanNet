@@ -173,7 +173,7 @@ print("Generate CPD dataset with Known Random Initial State")
 ## Test Neural Network
 print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
 # [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
-KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,cv_input_CPD,cv_target_CPD,test_input_CPD,test_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=train_init_CPD,cv_init=cv_init_CPD)
+KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,cv_input_CPD,cv_target_CPD,test_input_CPD,test_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,train_init=train_init_CPD,test_init=test_init_CPD,cv_init=cv_init_CPD)
 
 # Load index_error data
 index_error_data = torch.load(path_results_CPD+'/index_error.pt', map_location=device)
@@ -183,10 +183,13 @@ train_input = index_error_data['train_input']
 train_target = index_error_data['train_target']
 cv_input = index_error_data['cv_input']
 cv_target = index_error_data['cv_target']
-x_estimation_cv = index_error_data['x_estimation_cv']
-x_ture_cv = index_error_data['x_ture_cv']
-y_estimation_cv = index_error_data['y_estimation_cv']
-y_ture_cv = index_error_data['y_ture_cv']
+test_input = index_error_data['test_input']
+test_target = index_error_data['test_target']
+
+x_estimation_test = index_error_data['x_estimation_test']
+x_ture_test = index_error_data['x_ture_test']
+y_estimation_test = index_error_data['y_estimation_test']
+y_ture_test = index_error_data['y_ture_test']
 
 # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
-[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,cv_input, cv_target, path_results_CPD,x_estimation_cv,x_ture_cv,y_estimation_cv,y_ture_cv, MaskOnState=not Train_Loss_On_AllState)
+[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)

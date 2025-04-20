@@ -93,8 +93,8 @@ class Pipeline_CPD:
         # Plot the predicted trajectory vs actual trajectory
         time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
         plt.subplot(1, 2, 1)
-        plt.plot(x_out_test[batch_idx, 0, :].detach().cpu().numpy(), label="Predicted Trajectory", linestyle='--')
-        plt.plot(test_target[batch_idx, 0, :].detach().cpu().numpy(), label="Actual Trajectory", linestyle='-')
+        plt.plot(x_out_test[batch_idx, 0, :].detach().cpu().numpy(), label="Predicted CPD probability", linestyle='--')
+        plt.plot(test_target[batch_idx, 0, :].detach().cpu().numpy(), label="Actual CPD probability", linestyle='-')
         plt.axvline(x=changepoint, color='green', linestyle='--', label=f'Changepoint ({changepoint})')
         plt.xlabel("Time Steps")
         plt.ylabel("Value")
