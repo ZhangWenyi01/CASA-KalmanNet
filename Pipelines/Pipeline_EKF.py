@@ -455,12 +455,7 @@ class Pipeline_EKF:
         test_target = torch.abs(x_out_test[:,0:1,:] - test_target[:,0:1,:])
         test_input = torch.abs(y_test_estimation - test_input)
 
-        # Normalize errors to range [0, 4]
-        def normalize_error(error):
-            min_val = torch.min(error, dim=2, keepdim=True)[0]
-            max_val = torch.max(error, dim=2, keepdim=True)[0]
-            return (error - min_val) / (max_val - min_val) * 2
-
+        # Apply sigmoid transformation, minus 0.5 to center around 0
         train_target = torch.sigmoid(train_target)-0.5
         train_input = torch.sigmoid(train_input)-0.5
         cv_target = torch.sigmoid(cv_target)-0.5
@@ -468,14 +463,15 @@ class Pipeline_EKF:
         test_target = torch.sigmoid(test_target)-0.5
         test_input = torch.sigmoid(test_input)-0.5
         
-
-        # Apply tanh transformation
-        train_target = torch.tanh(15*train_target)
-        train_input = torch.tanh(15*train_input)
-        cv_target = torch.tanh(15*cv_target)
-        cv_input = torch.tanh(15*cv_input)   
-        test_target = torch.tanh(15*test_target)
-        test_input = torch.tanh(15*test_input)
+        # Apply tanh transformation, scale_param is a hyperparameter to 
+        # control the range
+        scale_param = 19
+        train_target = torch.tanh(scale_param*train_target)
+        train_input = torch.tanh(scale_param*train_input)
+        cv_target = torch.tanh(scale_param*cv_target)
+        cv_input = torch.tanh(scale_param*cv_input)   
+        test_target = torch.tanh(scale_param*test_target)
+        test_input = torch.tanh(scale_param*test_input)
         
         # Calculate MSE over sample intervals
         def calculate_mse_over_intervals(tanh_index, sample_interval):

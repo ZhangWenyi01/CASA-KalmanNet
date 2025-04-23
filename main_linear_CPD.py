@@ -155,7 +155,7 @@ KNet_Pipeline.setTrainingParams(args)
 # and used to generate CPD dataset for training CPDNet. Change point inclued in 
 # the dataset.
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
-                            args.T_test,Q_afterCPD=Q_gen*500)
+                            args.T_test,Q_afterCPD=Q_gen*200)
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
 utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
 [train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)

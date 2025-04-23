@@ -194,7 +194,8 @@ class KalmanNetNN(torch.nn.Module):
         # update y_prev
         self.y_previous = y
 
-        # return
+        # return, return three tensors in CDPDataset, return one tensor in 
+        # KalmanNet
         return self.m1x_posterior,self.m1x_prior,self.m1y
         # return self.m1x_posterior
 
