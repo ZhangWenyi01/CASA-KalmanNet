@@ -9,6 +9,7 @@ import random
 import time
 from Plot import Plot_extended
 from mpl_toolkits.mplot3d import Axes3D
+from Simulations.utils import cpd_dataset_process
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import os
@@ -416,10 +417,14 @@ class Pipeline_EKF:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
         
         for t in range(0, SysModel.T_test):
-            output, prior, y = self.model(torch.unsqueeze(train_input[:,:, t],2))
+            # output, prior, y = self.model(torch.unsqueeze(train_input[:,:, t],2))
+            # x_out_train_prior[:,:, t] = prior[:,0,:]
+            # y_train_estimation[:,:, t] = torch.squeeze(y, dim=2)
+            output = self.model(torch.unsqueeze(train_input[:,:, t],2))
             x_out_train[:,:, t] = output[:,0,:]
-            x_out_train_prior[:,:, t] = prior[:,0,:]
-            y_train_estimation[:,:, t] = torch.squeeze(y, dim=2)
+            x_out_train_prior[:,:, t] = self.model.m1x_prior[:,0,:]
+            y_train_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
+
         
         # Process cv data
         self.model.batch_size = self.N_CV
@@ -429,10 +434,10 @@ class Pipeline_EKF:
         else:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_cv)
         for t in range(0, SysModel.T_cv):
-            output, prior,y= self.model(torch.unsqueeze(cv_input[:,:, t],2))
+            output = self.model(torch.unsqueeze(cv_input[:,:, t],2))
             x_out_cv[:,:, t] = output[:,0,:]
-            x_out_cv_prior[:,:, t] = prior[:,0,:]
-            y_cv_estimation[:,:, t] = torch.squeeze(y,dim=2)
+            x_out_cv_prior[:,:, t] = self.model.m1x_prior[:,0,:]
+            y_cv_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
             
         # Process test data
         self.model.batch_size = self.N_T
@@ -442,51 +447,79 @@ class Pipeline_EKF:
         else:
             self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
         for t in range(0, SysModel.T_test):
-            output, prior,y= self.model(torch.unsqueeze(test_input[:,:, t],2))
+            output = self.model(torch.unsqueeze(test_input[:,:, t],2))
             x_out_test[:,:, t] = output[:,0,:]
-            x_out_test_prior[:,:, t] = prior[:,0,:]
-            y_test_estimation[:,:, t] = torch.squeeze(y,dim=2)
+            x_out_test_prior[:,:, t] = self.model.m1x_prior[:,0,:]
+            y_test_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
 
-        # Calculate absolute errors
-        train_target = torch.abs(x_out_train[:,0:1,:] - train_target[:,0:1,:])
-        train_input = torch.abs(y_train_estimation - train_input)
-        cv_target = torch.abs(x_out_cv[:,0:1,:] - cv_target[:,0:1,:])
-        cv_input = torch.abs(y_cv_estimation - cv_input)
-        test_target = torch.abs(x_out_test[:,0:1,:] - test_target[:,0:1,:])
-        test_input = torch.abs(y_test_estimation - test_input)
+        train_target = cpd_dataset_process(x_out_train,
+                                                train_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
+        train_input = cpd_dataset_process(y_train_estimation,
+                                                train_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
+        cv_target = cpd_dataset_process(x_out_cv,
+                                                cv_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
+        cv_input = cpd_dataset_process(y_cv_estimation,
+                                                cv_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
+        test_target = cpd_dataset_process(x_out_test,
+                                                test_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
+        test_input = cpd_dataset_process(y_test_estimation,
+                                                test_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=19)
 
-        # Apply sigmoid transformation, minus 0.5 to center around 0
-        train_target = torch.sigmoid(train_target)-0.5
-        train_input = torch.sigmoid(train_input)-0.5
-        cv_target = torch.sigmoid(cv_target)-0.5
-        cv_input = torch.sigmoid(cv_input)-0.5
-        test_target = torch.sigmoid(test_target)-0.5
-        test_input = torch.sigmoid(test_input)-0.5
+        # # Calculate absolute errors
+        # train_target = torch.abs(x_out_train[:,0:1,:] - train_target[:,0:1,:])
+        # train_input = torch.abs(y_train_estimation - train_input)
+        # cv_target = torch.abs(x_out_cv[:,0:1,:] - cv_target[:,0:1,:])
+        # cv_input = torch.abs(y_cv_estimation - cv_input)
+        # test_target = torch.abs(x_out_test[:,0:1,:] - test_target[:,0:1,:])
+        # test_input = torch.abs(y_test_estimation - test_input)
+
+        # # Apply sigmoid transformation, minus 0.5 to center around 0
+        # train_target = torch.sigmoid(train_target)-0.5
+        # train_input = torch.sigmoid(train_input)-0.5
+        # cv_target = torch.sigmoid(cv_target)-0.5
+        # cv_input = torch.sigmoid(cv_input)-0.5
+        # test_target = torch.sigmoid(test_target)-0.5
+        # test_input = torch.sigmoid(test_input)-0.5
         
-        # Apply tanh transformation, scale_param is a hyperparameter to 
-        # control the range
-        scale_param = 19
-        train_target = torch.tanh(scale_param*train_target)
-        train_input = torch.tanh(scale_param*train_input)
-        cv_target = torch.tanh(scale_param*cv_target)
-        cv_input = torch.tanh(scale_param*cv_input)   
-        test_target = torch.tanh(scale_param*test_target)
-        test_input = torch.tanh(scale_param*test_input)
+        # # Apply tanh transformation, scale_param is a hyperparameter to 
+        # # control the range
+        # scale_param = 19
+        # train_target = torch.tanh(scale_param*train_target)
+        # train_input = torch.tanh(scale_param*train_input)
+        # cv_target = torch.tanh(scale_param*cv_target)
+        # cv_input = torch.tanh(scale_param*cv_input)   
+        # test_target = torch.tanh(scale_param*test_target)
+        # test_input = torch.tanh(scale_param*test_input)
         
-        # Calculate MSE over sample intervals
-        def calculate_mse_over_intervals(tanh_index, sample_interval):
-            num_intervals = tanh_index.size(2) - sample_interval + 1
-            mse_result = torch.zeros((tanh_index.size(0), tanh_index.size(1), num_intervals))
-            for i in range(num_intervals):
-                mse_result[:, :, i] = torch.mean((tanh_index[:, :, i:i + sample_interval]) ** 2, dim=2)
-            return mse_result
+        # # Calculate MSE over sample intervals
+        # def calculate_mse_over_intervals(tanh_index, sample_interval):
+        #     num_intervals = tanh_index.size(2) - sample_interval + 1
+        #     mse_result = torch.zeros((tanh_index.size(0), tanh_index.size(1), num_intervals))
+        #     for i in range(num_intervals):
+        #         mse_result[:, :, i] = torch.mean((tanh_index[:, :, i:i + sample_interval]) ** 2, dim=2)
+        #     return mse_result
 
-        train_target = calculate_mse_over_intervals(train_target, self.sample_interval)
-        cv_target = calculate_mse_over_intervals(cv_target, self.sample_interval)
-        train_input = calculate_mse_over_intervals(train_input, self.sample_interval)
-        cv_input = calculate_mse_over_intervals(cv_input, self.sample_interval)
-        test_target = calculate_mse_over_intervals(test_target, self.sample_interval)
-        test_input = calculate_mse_over_intervals(test_input, self.sample_interval)
+        # train_target = calculate_mse_over_intervals(train_target, self.sample_interval)
+        # cv_target = calculate_mse_over_intervals(cv_target, self.sample_interval)
+        # train_input = calculate_mse_over_intervals(train_input, self.sample_interval)
+        # cv_input = calculate_mse_over_intervals(cv_input, self.sample_interval)
+        # test_target = calculate_mse_over_intervals(test_target, self.sample_interval)
+        # test_input = calculate_mse_over_intervals(test_input, self.sample_interval)
+        
+            
+        
         
         
         # # Plot
@@ -537,17 +570,27 @@ class Pipeline_EKF:
 
         # Save results
         torch.save({
+            # Datasets used to train CPDNet
             'train_input': train_input,
             'train_target': train_target,
             'cv_input': cv_input,
             'cv_target': cv_target,
             'test_input': test_input,
             'test_target': test_target,
+            # Test datasets used from KalmanNet
             'x_estimation_test': x_out_test,
             'x_ture_test': test_target_plt,
             'y_estimation_test': y_test_estimation,
-            'y_ture_test': test_input_plt
+            'y_ture_test': test_input_plt,
+            # Train datasets used from KalmanNet
+            'x_estimation_train': x_out_train,
+            'x_ture_train': train_target_plt,
+            'y_estimation_train': y_train_estimation,
+            'y_ture_train': train_input_plt,
+            # Cross Validation datasets used from KalmanNet
+            'x_estimation_cv': x_out_cv,
+            'x_ture_cv': cv_target_plt,
+            'y_estimation_cv': y_cv_estimation,
+            'y_ture_cv': cv_input_plt
         }, path_dataset + 'index_error.pt')
- 
-
 

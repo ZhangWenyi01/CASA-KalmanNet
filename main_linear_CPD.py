@@ -14,7 +14,8 @@ from KNet.KalmanNet_nn import KalmanNetNN
 
 from Pipelines.Pipeline_EKF import Pipeline_EKF as Pipeline
 from Pipelines.Pipeline_CPD import Pipeline_CPD as Pipeline_CPD
-
+from Pipelines.Pipeline_Unsupervised import Pipeline_Unsupervised as Pipeline_Unsupervised
+import matplotlib.pyplot as plt
 from CPDNet.CPDNet_nn import CPDNetNN
 
 from Plot import Plot_extended as Plot
@@ -155,7 +156,7 @@ KNet_Pipeline.setTrainingParams(args)
 # and used to generate CPD dataset for training CPDNet. Change point inclued in 
 # the dataset.
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
-                            args.T_test,Q_afterCPD=Q_gen*200)
+                            args.T_test,Q_afterCPD=Q_gen*500)
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
 utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
 [train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
@@ -191,5 +192,51 @@ x_ture_test = index_error_data['x_ture_test']
 y_estimation_test = index_error_data['y_estimation_test']
 y_ture_test = index_error_data['y_ture_test']
 
+x_estimation_train = index_error_data['x_estimation_train']
+x_ture_train = index_error_data['x_ture_train']
+y_estimation_train = index_error_data['y_estimation_train']
+y_ture_train = index_error_data['y_ture_train']
+
+x_estimation_cv = index_error_data['x_estimation_cv']
+x_ture_cv = index_error_data['x_ture_cv']
+y_estimation_cv = index_error_data['y_estimation_cv']
+y_ture_cv = index_error_data['y_ture_cv']
+
 # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
-[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)
+# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)
+
+# Unsupervised stage initialization
+# Load CPDNet model
+unsupervised_pipeline = Pipeline_Unsupervised()
+unsupervised_pipeline.setCPDNet('CPDNet')
+unsupervised_pipeline.setKNet('KNet')
+unsupervised_pipeline.setTrainingParams(args)
+
+# cpd_test = utils.cpd_dataset_process(y_estimation_cv,y_ture_cv)
+# compare = train_input
+# # Plot compare and cpd_test curves in two subplots
+# plt.figure(figsize=(12, 8))
+
+# # First subplot for compare
+# plt.subplot(2, 1, 1)
+# plt.plot(compare[0,0,:].cpu().detach().numpy(), label="Compare", color="blue")
+# plt.xlabel("Time Steps")
+# plt.ylabel("Values")
+# plt.title("Compare Curve")
+# plt.legend()
+# plt.grid()
+
+# # Second subplot for cpd_test
+# plt.subplot(2, 1, 2)
+# plt.plot(cpd_test[0,0,:].cpu().detach().numpy(), label="CPD Test", color="orange")
+# plt.xlabel("Time Steps")
+# plt.ylabel("Values")
+# plt.title("CPD Test Curve")
+# plt.legend()
+# plt.grid()
+
+# plt.tight_layout()
+# plt.show()
+
+unsupervised_pipeline.NNTrain(sys_model_CPD,y_ture_train,x_ture_train,\
+                             randomInit=True, train_init=train_init_CPD)

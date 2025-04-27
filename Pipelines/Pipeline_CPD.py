@@ -66,7 +66,7 @@ class Pipeline_CPD:
         self.N_T = test_input.shape[0]
         SysModel.T_test = test_input.size()[-1]
         self.MSE_test_linear_arr = torch.zeros([self.N_T])
-        x_out_test = torch.zeros([self.N_T, 1,SysModel.T_test-self.sample_interval+1]).to(self.device)
+        x_out_test = torch.zeros([self.N_T, 1,SysModel.T_test]).to(self.device)
 
         if MaskOnState:
             mask = torch.tensor([True,False,False])

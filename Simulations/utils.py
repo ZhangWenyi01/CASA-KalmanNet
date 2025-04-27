@@ -175,3 +175,46 @@ def Short_Traj_Split(data_target, data_input, T):### Random Init is automaticall
     input = data_input[:,:,1:]
     init = data_target[:,:,0]
     return [target, input, init]
+
+# Function to process data for CPD
+
+# Calculate MSE over sample intervals
+def calculate_mse_over_intervals(tanh_index, sample_interval):
+    num_intervals = tanh_index.size(2) - sample_interval + 1
+    mse_result = torch.zeros((tanh_index.size(0), tanh_index.size(1), 
+                              num_intervals))
+    for i in range(num_intervals):
+        mse_result[:, :, i] = torch.mean(
+            (tanh_index[:, :, i:i + sample_interval]) ** 2, dim=2
+            )
+    return mse_result
+
+
+def cpd_dataset_process(input_one:torch.Tensor,input_two:torch.Tensor,
+                        sample_interval:int = 5,
+                        scale_param:int = 19)->torch.Tensor:
+    # Calculate absolute errors
+    abs_errors = torch.abs(input_one[:,0:1,:] - input_two[:,0:1,:])
+    # Apply sigmoid transformation, minus 0.5 to center around 0
+    transformed_errors = torch.sigmoid(abs_errors) - 0.5
+    # Apply tanh transformation, scale_param is a hyperparameter to 
+    # control the range
+    transformed_errors =  torch.tanh(scale_param*transformed_errors)
+    
+    # Calculate MSE over sample intervals
+    mse_result = calculate_mse_over_intervals(transformed_errors, 
+                                              sample_interval)
+    return mse_result
+
+def cpd_dataset_process_single(input_one:torch.Tensor,input_two:torch.Tensor,
+                        sample_interval:int = 5,
+                        scale_param:int = 19)->torch.Tensor:
+    # Calculate absolute errors
+    abs_errors = torch.abs(input_one[:,0:1] - input_two[:,0:1])
+    # Apply sigmoid transformation, minus 0.5 to center around 0
+    transformed_errors = torch.sigmoid(abs_errors) - 0.5
+    # Apply tanh transformation, scale_param is a hyperparameter to 
+    # control the range
+    transformed_errors =  torch.tanh(scale_param*transformed_errors)
+
+    return transformed_errors

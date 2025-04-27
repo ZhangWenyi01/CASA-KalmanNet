@@ -58,10 +58,11 @@ def general_settings():
                         help='input dimension multiplier for KNet')
     parser.add_argument('--out_mult_KNet', type=int, default=40, metavar='out_mult_KNet',
                         help='output dimension multiplier for KNet')
-
     ### CPDNet settings
     parser.add_argument('--sample_interval', type=int, default=5, metavar='sample_interval',
                         help='input sample size for CPDNet')
+    parser.add_argument('--threshold', type=float, default=0.6, metavar='threshold',
+                        help='Threshold for CPDNet changepoint detection')
     
     args = parser.parse_args()
     return args
