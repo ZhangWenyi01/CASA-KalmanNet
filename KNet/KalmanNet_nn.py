@@ -211,6 +211,9 @@ class KalmanNetNN(torch.nn.Module):
         obs_innov_diff = expand_dim(obs_innov_diff)
         fw_evol_diff = expand_dim(fw_evol_diff)
         fw_update_diff = expand_dim(fw_update_diff)
+        self.GRU_Q.flatten_parameters()
+        self.GRU_Sigma.flatten_parameters()
+        self.GRU_S.flatten_parameters()
 
         ####################
         ### Forward Flow ###
@@ -288,5 +291,7 @@ class KalmanNetNN(torch.nn.Module):
         self.h_Q = hidden.data
         self.h_Q = self.prior_Q.flatten().reshape(1,1, -1).repeat(self.seq_len_input,self.batch_size, 1) # batch size expansion
 
-
-
+    def init_hidden(self):
+        weight = next(self.parameters()).data
+        hidden = weight.new(self.n_layers, self.batch_size, self.hidden_dim).zero_()
+        self.hn = hidden.data

@@ -22,11 +22,23 @@ class Pipeline_Unsupervised:
         self.CPDmodel = torch.load(model_path, 
                                 map_location=self.device,weights_only=False) 
         
+    
     # Setting KNet
     def setKNet(self, path_results):
         model_path = os.path.join(path_results, 'best-model.pt')
         self.KNetmodel = torch.load(model_path, 
                         map_location=self.device,weights_only=False) 
+        
+    def setssModel(self, ssModel):
+        self.ssModel = ssModel
+        
+    def ResetOptimizer(self):
+        self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
+
+    def setKNetLearningRate(self, learningRate):
+        self.learningRate = learningRate
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = learningRate
         
     def setTrainingParams(self, args):
         self.args = args
@@ -44,139 +56,213 @@ class Pipeline_Unsupervised:
         self.sample_interval = args.sample_interval
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
         
-    def NNTrain(self, SysModel,y_observation,x_true,\
-        randomInit=False,train_init=None,train_lengthMask=None):
+    def NNTrain(self, SysModel,y_observation,x_true,train_init,cpd_input_for_plot,cpt_target_for_plot):
         
-        self.N_E = len(y_observation)
+        self.N_E = len(y_observation)  # Number of trajectories
+        self.stride = 1
         self.MSE_cv_linear_epoch = torch.zeros([self.N_steps])
         self.MSE_cv_dB_epoch = torch.zeros([self.N_steps])
-
         self.MSE_train_linear_epoch = torch.zeros([self.N_steps])
         self.MSE_train_dB_epoch = torch.zeros([self.N_steps])
+        
 
+        ###############################
+        ### Training Sequence Batch ###
+        ###############################
+        self.optimizer.zero_grad()
+        # KNet Training Mode
+        self.KNetmodel.train()
+        self.KNetmodel.batch_size = 1
+        # CPDNet Test Mode
+        self.CPDmodel.eval()
+        self.CPDmodel.batch_size = 1
+        # Init Hidden State
+        self.KNetmodel.init_hidden_KNet()
+        # Allocate estimate array
+        self.output_predictions = torch.empty((self.N_E, 1, SysModel.T), requires_grad=False)
+        self.state_predictions = torch.empty((self.N_E, 3, SysModel.T), requires_grad=False)
 
-        ##############
-        ### Epochs ###
-        ##############
+        # Copy to restore the NN to its original state for each trajectory
+        original_model = copy.deepcopy(self.KNetmodel)
 
-        self.MSE_cv_dB_opt = 1000
-        self.MSE_cv_idx_opt = 0
+        # For printing out useful information
+        counter = 0
 
-        for ti in range(0, self.N_steps):
+        # Start looping over trajectories
+        for trajectorie in range(self.N_E):
+            print('Trajectory: ', trajectorie + 1, '/', self.N_E)
 
             ###############################
             ### Training Sequence Batch ###
             ###############################
-            self.optimizer.zero_grad()
-            # KNet Training Mode
+
+            # Reset the model
+            self.KNetmodel = copy.deepcopy(original_model)
+            self.reTraining = False
+
+            # Reset optimizer
+            self.ResetOptimizer()
+
+            # Training Mode
             self.KNetmodel.train()
-            self.KNetmodel.batch_size = self.N_B
-            # CPDNet Test Mode
-            self.CPDmodel.eval()
-            self.CPDmodel.batch_size = self.N_B
-            # Init Hidden State
-            self.KNetmodel.init_hidden_KNet()
 
-            # Init Training Batch tensors
-            y_training_knet = torch.zeros([self.N_B, SysModel.n, SysModel.T]).to(self.device)
-            x_training_knet = torch.zeros([self.N_B, SysModel.m, SysModel.T]).to(self.device)
-            x_out_training_knet = torch.zeros([self.N_B, 1, SysModel.T]).to(self.device)
-            y_out_training_knet = torch.zeros([self.N_B, 1, SysModel.T]).to(self.device)
-            probability_cpd = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
-            cpd_train_input_batch = torch.zeros([self.N_B,1, SysModel.T-self.sample_interval+1]).to(self.device)
+            # Load the next trajectory
+            y_training = torch.unsqueeze(y_observation[trajectorie, :, :],0).to(self.device)
 
-            # Randomly select N_B training sequences
-            assert self.N_B <= self.N_E # N_B must be smaller than N_E
-            n_e = random.sample(range(self.N_E), k=self.N_B)
-            ii = 0
-            for index in n_e:
-                if self.args.randomLength:
-                    y_training_knet[ii,:,train_lengthMask[index,:]] = y_observation[index,:,train_lengthMask[index,:]]
-                    x_true[ii,:,train_lengthMask[index,:]] = x_true[index,:,train_lengthMask[index,:]]
-                else:
-                    y_training_knet[ii,:,:] = y_observation[index]
-                    x_training_knet[ii,:,:] = x_true[index]
-                ii += 1
+            # Initialize state
+            self.KNetmodel.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
+
+            # Calculate the number of strides required
+            number_of_stride = int(SysModel.T / self.stride)
+            # Calculate the remainder
+            remainder = int(SysModel.T % self.stride)
             
-            # Init Sequence
-            if(randomInit):
-                train_init_batch = torch.empty([self.N_B, SysModel.m,1]).to(self.device)
-                ii = 0
-                for index in n_e:
-                    train_init_batch[ii,:,0] = torch.squeeze(train_init[index])
-                    ii += 1
-                self.KNetmodel.InitSequence(train_init_batch, SysModel.T)
-            else:
-                self.KNetmodel.InitSequence(\
-                SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_B,1,1), SysModel.T)
-            
-            # Forward Computation
-            window_size = 20
-            detect_trigger = False
-            trigger_iteration = 0
-            cpd_probability_store = torch.zeros([self.N_B, window_size]).to(self.device)
-            for t in range(0, SysModel.T):
-                # Detecting stage:
-                x_out_training_knet[:, :, t] = torch.squeeze(self.KNetmodel(torch.unsqueeze(y_training_knet[:, :, t],2)))[:,0:1]
-                y_out_training_knet[:, :, t] = torch.unsqueeze(self.KNetmodel.m1y.squeeze(),dim=1)
-                cpd_train_input_batch = cpd_dataset_process_single(y_out_training_knet[:, :, t],
-                                                            y_training_knet[:, :, t]
-                                                            ).to(self.device)
-                probability_cpd[:,:,t] = self.CPDmodel(torch.unsqueeze(cpd_train_input_batch,2))
+            x_out_online_total = torch.empty(1, SysModel.m, SysModel.T).to(self.device)
+            y_out_online_total = torch.zeros(1, SysModel.n, SysModel.T).to(self.device)
+            cpd_output_total = torch.zeros(1, SysModel.n, SysModel.T).to(self.device)
+            cpd_input_total = torch.zeros(1, SysModel.n, SysModel.T).to(self.device)
+
+            # Go through the whole trajectory stride by stride, updating the NN parameters after every stride-
+            # time steps
+            for stride in range(number_of_stride):
+
+                # Initialize training mode
+                self.KNetmodel.train()
+
+                # Set the initial posterior to the previous posterior and detaching it from the gradient calculation
+                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.detach(),SysModel.T)
+
+                # Get next observations
+                observations = y_training[0,:, (stride * self.stride):(stride * self.stride + self.stride)]
+                observations = observations.reshape(1,SysModel.n,self.stride)
+
+                # Initialize hidden state of GRU
+                # self.KNetmodel.init_hidden()
+
+                # Allocate estimate arrays
+                x_KNet_posterior = torch.empty(1, SysModel.m, self.stride, requires_grad=True).to(self.device)
+                y_KNet_posterior = torch.zeros(1, SysModel.n, self.stride, requires_grad=True).to(self.device)
+                m1y_KNet_posterior = torch.zeros(1, SysModel.n, self.stride).to(self.device)
+                cpd_input = torch.zeros(1, SysModel.n, self.stride).to(self.device)
+                cpd_output = torch.zeros(1, SysModel.n, self.stride).to(self.device)
+
+                # Loop trough a single stride
+                for t in range(self.stride):
+                    # Take time step in NN
+                    x_KNet_posterior[:, :, t] = torch.squeeze(self.KNetmodel(torch.unsqueeze(observations[:, :, t], 0)).T,2)
+                    # Get the output estimate from the NN
+                    y_KNet_posterior[:, :, t] = self.KNetmodel.m1y.squeeze().T.clone().detach()
+                    m1y_KNet_posterior[:, :, t] = self.KNetmodel.m1y.squeeze().T.clone().detach()
+                # Plot x_KNet_posterior, y_KNet_posterior, and cpd_output
+                cpd_input[:, :, :] = cpd_dataset_process(observations,m1y_KNet_posterior)
                 
-                # If probability larger than threshold, store following values for detection and retraining
-                if (torch.mean(probability_cpd[:,:,t],dim=0) > self.args.threshold) or detect_trigger:
-                    if detect_trigger == False:
-                        detect_trigger = True
-                        trigger_iteration = t
-                    cpd_probability_store[:,t%window_size] = probability_cpd[:,:,t]
-                    if t >= window_size:
-                        # Calculate the mean of the last window_size probabilities
-                        mean_prob = torch.mean(cpd_probability_store, dim=1)
-                        # Check if the mean probability is above the threshold
-                        if mean_prob > self.args.threshold:
-                            # Perform retraining or any other action here
-                            print(f"Retraining triggered at time step {t}")
+                x_out_online_total[:, :, (stride * self.stride):(stride * self.stride + self.stride)] = x_KNet_posterior
+                y_out_online_total[:, :, (stride * self.stride):(stride * self.stride + self.stride)] = y_KNet_posterior
+                cpd_output_total[:, :, (stride * self.stride):(stride * self.stride + self.stride)] = cpd_output
+                cpd_input_total[:, :, (stride * self.stride):(stride * self.stride + self.stride)] = cpd_input
                 
-                # # Plot x_out_training_knet and y_out_training_knet in one figure,
-                # # plot probability_cpd in another figure
-                # _, ax = plt.subplots(1, 2, figsize=(12, 6))
-                # ax[0].plot(x_out_training_knet[0, 0, :].cpu().detach().numpy(), label='x_out')
-                # ax[0].plot(y_out_training_knet[0, 0, :].cpu().detach().numpy(), label='y_estimation')
-                # ax[0].plot(x_training_knet[0, 0, :].cpu().detach().numpy(), label='x_true')
-                # ax[0].plot(y_training_knet[0, 0, :].cpu().detach().numpy(), label='y_true')
-                # ax[0].set_title('x_out and y_out')
-                # ax[0].legend()
-                # ax[1].plot(probability_cpd[0, 0, :].cpu().detach().numpy(), label='probability_cpd')
-                # ax[1].set_title('probability_cpd')
-                # ax[1].legend()
+                # # Plot cpd_input_total and cpd_input_for_plot
+                # plt.figure(figsize=(10, 6))
+                # plt.plot(cpd_input_total[0, 0, :].cpu().detach().numpy(), label='cpd_input_total')
+                # plt.plot(cpd_input_for_plot[0, 0, :].cpu().detach().numpy(), label='cpd_input_for_plot')
+                # plt.title('cpd_input_total vs cpd_input_for_plot')
+                # plt.legend()
                 # plt.show()
+                    
 
-                # dB Loss
-                MSE_trainbatch_linear_LOSS = self.loss_fn(y_out_training_knet, y_training_knet)
-                self.MSE_train_linear_epoch[ti] = MSE_trainbatch_linear_LOSS.item()
-                self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
-
-                MSE_trainbatch_linear_LOSS.backward(retain_graph=True)
-                self.optimizer.step()
+                # Count the number of exceeding threshold values in the CPD output
+                num_exceeding_threshold = torch.sum(cpd_output > self.args.threshold).item()
+                if num_exceeding_threshold > self.stride/2:
+                    self.reTraining = True
                 
-                # Set the learning rate to a specific value
-                for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = torch.mean(probability_cpd)  # Example: set learning rate to 0.001
+                # Plug obtained values into the allocated arrays
+                self.output_predictions[trajectorie, :,
+                (stride * self.stride):(stride * self.stride + self.stride)] = y_KNet_posterior.detach()
+                self.state_predictions[trajectorie, :,
+                (stride * self.stride):(stride * self.stride + self.stride)] = x_KNet_posterior.detach()
 
-            ########################
-            ### Training Summary ###
-            ########################
-            print(ti, "MSE Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE Validation :", self.MSE_cv_dB_epoch[ti],
-                  "[dB]")
-                      
-            if (ti > 1):
-                d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
-                d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
-                print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
+                # Calculate Loss
+                LOSS = self.loss_fn(y_KNet_posterior, observations)
 
-            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
+                # Print statistics every 10% of a trajectory
+                counter += 1
+                if counter % max(int(number_of_stride/10),1) == 0:
+                    print('Training itt:', stride + 1, '/', number_of_stride, ',OBS MSE:',
+                          10 * torch.log10(LOSS).item(), '[dB]')
 
-        # return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch, self.MSE_train_linear_epoch, self.MSE_train_dB_epoch]
+                # optimize if reTraining is True
+                if self.reTraining is True:
+                    # Zero Gradient
+                    self.optimizer.zero_grad()
+                    # optimize
+                    LOSS.backward()
+                    self.optimizer.step()
 
+                # Clear variables to save memory
+                del observations, y_KNet_posterior, LOSS, x_KNet_posterior
+                
+            # Calculate the final time steps
+            if not remainder == 0:
+
+                # Initialize the posterior
+                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.detach())
+
+                # Get Observations
+                observations = y_training[0, :, -remainder:].reshape(1, SysModel.n, remainder).detach()
+
+                # Initialize hidden state of GRU
+                self.KNetmodel.init_hidden()
+
+                # Allocate estimates
+                x_KNet_posterior = torch.empty(1, SysModel.m, remainder)
+                y_KNet_posterior = torch.empty(1, SysModel.n, remainder)
+
+                # Loop through the remaining time steps
+                for t in range(remainder):
+                    # Take time step in NN
+                    x_KNet_posterior[:, :, t] = self.KNetmodel(observations[:, :, t]).T
+                    # Get the output of the NN
+                    y_KNet_posterior[:, :, t] = self.KNetmodel.m1y.squeeze().T
+
+                # Plug obtained values into the allocated arrays
+                self.output_predictions[trajectorie, :, -remainder:] = y_KNet_posterior
+                self.state_predictions[trajectorie, :, -remainder:] = x_KNet_posterior
+
+            # Reset the optimizer for the next trajectory
+            self.ResetOptimizer()
+            
+            plt.figure(figsize=(10, 6))
+            plt.subplot(2, 1, 1)
+            plt.plot(y_out_online_total[0, 0, :].cpu().detach().numpy(), label='y_out_online_total')
+            plt.plot(y_observation[0, 0, :].cpu().detach().numpy(), label='y_observation')
+            plt.plot(x_out_online_total[0, 0, :].cpu().detach().numpy(), label='x_out_online_total')
+            plt.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(), label='x_true')
+            plt.title('y_out_online_total, y_observation, x_out_online_total, x_true')
+            plt.legend()
+            plt.subplot(2, 1, 2)
+            plt.plot(cpd_output_total[0, 0, :].cpu().detach().numpy(), label='cpd_output_total')
+            plt.plot(cpt_target_for_plot[0, 0, :].cpu().detach().numpy(), label='cpt_target_for_plot')
+            plt.title('cpd_output_total, cpt_target_for_plot')
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+        loss_fn = torch.nn.MSELoss(reduction='none')
+
+        # self.MSE_state_arr = loss_fn(training_dataset.target,self.state_predictions)
+        # self.MSE_observation_arr = loss_fn(training_dataset.input,self.output_predictions)
+
+        self.MSE_states_over_time = 10 * torch.log10(torch.mean(self.MSE_state_arr,axis = (0,1)))
+        self.MSE_observation_over_time = 10 * torch.log10(torch.mean(self.MSE_observation_arr,axis = (0,1)))
+
+        self.MSE_states_over_trajectories = 10 * torch.log10(torch.mean(self.MSE_state_arr,axis = (1,2)))
+        self.MSE_observation_over_trajectories = 10 * torch.log10(torch.mean(self.MSE_observation_arr,axis = (1,2)))
+
+
+        self.MSE_states_before_training = 10 * torch.log10(torch.mean(self.MSE_state_arr[:,:,:self.training_start])).item()
+        self.MSE_states_after_training = 10 * torch.log10(torch.mean(self.MSE_state_arr[:,:,self.training_start:])).item()
+
+        if not self.training_start==0:
+            print('MSE before training start:',self.MSE_states_before_training,'[dB]')
+        print('MSE after training start:', self.MSE_states_after_training,'[dB]')
 

@@ -207,10 +207,17 @@ y_ture_cv = index_error_data['y_ture_cv']
 
 # Unsupervised stage initialization
 # Load CPDNet model
+sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
+sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
 unsupervised_pipeline = Pipeline_Unsupervised()
 unsupervised_pipeline.setCPDNet('CPDNet')
 unsupervised_pipeline.setKNet('KNet')
+unsupervised_pipeline.setssModel(sys_model_online)
+args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
+unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD,train_input,train_target)
+
+
 
 # cpd_test = utils.cpd_dataset_process(y_estimation_cv,y_ture_cv)
 # compare = train_input
@@ -237,6 +244,3 @@ unsupervised_pipeline.setTrainingParams(args)
 
 # plt.tight_layout()
 # plt.show()
-
-unsupervised_pipeline.NNTrain(sys_model_CPD,y_ture_train,x_ture_train,\
-                             randomInit=True, train_init=train_init_CPD)

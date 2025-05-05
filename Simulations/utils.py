@@ -215,6 +215,6 @@ def cpd_dataset_process_single(input_one:torch.Tensor,input_two:torch.Tensor,
     transformed_errors = torch.sigmoid(abs_errors) - 0.5
     # Apply tanh transformation, scale_param is a hyperparameter to 
     # control the range
-    transformed_errors =  torch.tanh(scale_param*transformed_errors)
+    transformed_errors =  torch.tanh(scale_param*transformed_errors)**2
 
     return transformed_errors
