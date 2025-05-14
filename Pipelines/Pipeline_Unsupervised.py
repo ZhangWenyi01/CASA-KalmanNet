@@ -8,6 +8,8 @@ from Plot import Plot_extended
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 from Simulations.utils import cpd_dataset_process,cpd_dataset_process_single  
+from tqdm import tqdm
+from tqdm import trange
 
 class Pipeline_Unsupervised:
     # Initialize the pipeline with CPDNet path and KNet path
@@ -34,11 +36,6 @@ class Pipeline_Unsupervised:
         
     def ResetOptimizer(self):
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
-
-    def setKNetLearningRate(self, learningRate):
-        self.learningRate = learningRate
-        for param_group in self.optimizer.param_groups:
-            param_group['lr'] = learningRate
         
     def setTrainingParams(self, args):
         self.args = args
@@ -57,15 +54,11 @@ class Pipeline_Unsupervised:
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
         
 
-    def NNTrain(self, SysModel,y_observation,x_true,train_init,cpd_input_for_plot,cpt_target_for_plot):
+    def NNTrain(self, SysModel,y_observation,x_true,train_init):
         
         self.N_E = len(y_observation)  # Number of trajectories
-        # self.MSE_cv_linear_epoch = torch.zeros([self.N_steps])
-        # self.MSE_cv_dB_epoch = torch.zeros([self.N_steps])
-        # self.MSE_train_linear_epoch = torch.zeros([self.N_steps])
-        # self.MSE_train_dB_epoch = torch.zeros([self.N_steps])
-        
         self.stride = 5
+        
 
         ###############################
         ### Training Sequence Batch ###
@@ -84,14 +77,20 @@ class Pipeline_Unsupervised:
         self.state_predictions = torch.empty((self.N_E, 3, SysModel.T))
         self.observation_original = torch.empty((self.N_E, 1, SysModel.T))
         self.state_original = torch.empty((self.N_E, 3, SysModel.T))
+        self.observation_unsupervised = torch.empty((self.N_E, 1, SysModel.T))
+        self.state_unsupervised = torch.empty((self.N_E, 3, SysModel.T))
 
         # Copy to restore the NN to its original state for each trajectory
         original_model = copy.deepcopy(self.KNetmodel)
         original_model.eval()
         original_model.batch_size = 1
         original_model.init_hidden_KNet()
-
         
+        unsupervised_model = copy.deepcopy(self.KNetmodel)
+        unsupervised_model.train()
+        unsupervised_model.batch_size = 1
+        unsupervised_model.init_hidden_KNet()
+        self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
         
         # Start looping over trajectories
         for trajectorie in range(self.N_E):
@@ -112,30 +111,37 @@ class Pipeline_Unsupervised:
             # Initialize state
             self.KNetmodel.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
             original_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
+            unsupervised_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
             # Calculate the number of strides required
             number_of_stride = int(self.ssModel.T / self.stride)
             
-            cpd_output = torch.zeros(1, SysModel.n, SysModel.T-self.sample_interval+1).to(self.device)
-            # cpd_input = torch.zeros(1, SysModel.n, SysModel.T-self.sample_interval+1).to(self.device)
             cpd_input = torch.zeros(1, SysModel.n, SysModel.T).to(self.device)
             counter = 0
             
 
             # Go through the whole trajectory step by step
-            for stride in range(number_of_stride):
+            for stride in trange(number_of_stride):
                 observation = y_training[:, :, (stride * self.stride):(stride * self.stride + self.stride)].to(self.device)
+                
                 x_out_online = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_online = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
+                
                 x_out_original = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_original = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
+                
+                x_out_unsupervised = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
+                y_out_unsupervised = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
                 # Initialize training mode
                 self.KNetmodel.train()
                 original_model.eval()
+                unsupervised_model.train()
                 # Initialize the informations
                 self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.clone().detach(),SysModel.T)
                 original_model.InitSequence(original_model.m1x_posterior.clone().detach(),SysModel.T)
+                unsupervised_model.InitSequence(unsupervised_model.m1x_posterior.clone().detach(),SysModel.T)
                 self.KNetmodel.init_hidden_KNet()
                 original_model.init_hidden_KNet()
+                unsupervised_model.init_hidden_KNet()
 
                 # Start training
                 for i in range(self.stride):
@@ -143,6 +149,8 @@ class Pipeline_Unsupervised:
                     y_out_online[:, :, i] = torch.squeeze(self.KNetmodel.m1y)
                     x_out_original[:, :, i] = torch.squeeze(original_model(torch.unsqueeze(observation[:, :, i],dim=2)))
                     y_out_original[:, :, i] = torch.squeeze(original_model.m1y)
+                    x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    y_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model.m1y)
 
                 self.observation_predictions[trajectorie, :,
                 (stride * self.stride):(stride * self.stride + self.stride)] = y_out_online.detach()
@@ -152,6 +160,11 @@ class Pipeline_Unsupervised:
                 (stride * self.stride):(stride * self.stride + self.stride)] = y_out_original.detach()
                 self.state_original[trajectorie, :,
                 (stride * self.stride):(stride * self.stride + self.stride)] = x_out_original.detach()
+                self.observation_unsupervised[trajectorie, :,
+                (stride * self.stride):(stride * self.stride + self.stride)] = y_out_unsupervised.detach()
+                self.state_unsupervised[trajectorie, :,
+                (stride * self.stride):(stride * self.stride + self.stride)] = x_out_unsupervised.detach()
+                
                 if stride >0:
                     for t in range(self.stride):
                         cpd_input[:, :, (stride-1)*self.stride+t] = cpd_dataset_process(torch.unsqueeze(self.observation_predictions[trajectorie, :,(stride * self.stride-self.stride+t):(stride * self.stride+t)],dim=0).to(self.device),
@@ -164,63 +177,41 @@ class Pipeline_Unsupervised:
 
                 LOSS = self.loss_fn(y_out_online,observation)
                 self.optimizer.zero_grad()
-                # optimize
                 LOSS.backward()
-                
                 self.optimizer.step()
                 
+                LOSS_unsupervised = self.loss_fn(y_out_unsupervised,observation)
+                self.optimizer_unsupervised.zero_grad()
+                LOSS_unsupervised.backward()
+                self.optimizer_unsupervised.step()
+                
                 #  Print statistics every 10% of a trajectory
-                counter += 1
-                if counter % max(int(number_of_stride/10),1) == 0:
-                    print('Training itt:', stride + 1, '/', number_of_stride, ',OBS MSE:',
-                          10 * torch.log10(LOSS).item(), '[dB]')
+                # counter += 1
+                # if counter % max(int(number_of_stride/10),1) == 0:
+                #     print('Training itt:', stride + 1, '/', number_of_stride, ',OBS MSE:',
+                #           10 * torch.log10(LOSS).item(), '[dB]')
                     
-                del LOSS,y_out_online,observation
+                del LOSS,y_out_online,observation,LOSS_unsupervised
             # Reset the optimizer for the next trajectory
             self.ResetOptimizer()
             
+            loss_fn = torch.nn.MSELoss(reduction='none')
+            MSE_Original_Linear = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
+            MSE_Original_dB = 10 * torch.log10(MSE_Original_Linear)
+            MSE_CPDUnsupervised_Linear = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
+            MSE_CPDUnsupervised_dB = 10 * torch.log10(MSE_CPDUnsupervised_Linear)
+            MSE_Unsupervised_Linear = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
+            MSE_Unsupervised_dB = 10 * torch.log10(MSE_Unsupervised_Linear)
+            print('MSE Original:', MSE_Original_dB.mean().item(), '[dB]')
+            print('MSE CPDUnsupervised:', MSE_CPDUnsupervised_dB.mean().item(), '[dB]')
+            print('MSE Unsupervised:', MSE_Unsupervised_dB.mean().item(), '[dB]')
             
             plt.figure(figsize=(10, 6))
-            plt.plot(self.observation_predictions[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_online')
-            plt.plot(self.observation_original[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_observation')
+            plt.plot(self.state_predictions[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_online')
+            plt.plot(self.state_original[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_original')
             plt.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(), label='x_true')
-            plt.title('y_out_online, y_training, x_out_online, x_true')
+            plt.plot(self.state_unsupervised[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_unsupervised')
+            plt.title('y_out_online,y_out_original,y_out_unsupervised, x_true')
             plt.legend()
             plt.show()
-            
-            
-            # plt.figure(figsize=(10, 6))
-            # plt.subplot(1, 2, 1)
-            # plt.plot(self.observation_predictions[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_online_total')
-            # plt.plot(y_training[0, 0, :].cpu().detach().numpy(), label='y_training')
-            # plt.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(), label='x_true')
-            # plt.title('y_out_online_total, y_training, x_out_online_total, x_true')
-            # plt.legend()
-            
-            # plt.subplot(1, 2, 2)
-            # plt.plot(cpt_target_for_plot[trajectorie, 0, :].cpu().detach().numpy(), label='cpt_target_for_plot')
-            # plt.plot(cpd_output[0, 0, :].cpu().detach().numpy(), label='cpt_output')
-            # plt.title('cpd_output_total')
-            # plt.legend()
-            # plt.tight_layout()
-            # plt.show()
-
-        loss_fn = torch.nn.MSELoss(reduction='none')
-
-        # self.MSE_state_arr = loss_fn(training_dataset.target,self.state_predictions)
-        # self.MSE_observation_arr = loss_fn(training_dataset.input,self.output_predictions)
-
-        self.MSE_states_over_time = 10 * torch.log10(torch.mean(self.MSE_state_arr,axis = (0,1)))
-        self.MSE_observation_over_time = 10 * torch.log10(torch.mean(self.MSE_observation_arr,axis = (0,1)))
-
-        self.MSE_states_over_trajectories = 10 * torch.log10(torch.mean(self.MSE_state_arr,axis = (1,2)))
-        self.MSE_observation_over_trajectories = 10 * torch.log10(torch.mean(self.MSE_observation_arr,axis = (1,2)))
-
-
-        self.MSE_states_before_training = 10 * torch.log10(torch.mean(self.MSE_state_arr[:,:,:self.training_start])).item()
-        self.MSE_states_after_training = 10 * torch.log10(torch.mean(self.MSE_state_arr[:,:,self.training_start:])).item()
-
-        if not self.training_start==0:
-            print('MSE before training start:',self.MSE_states_before_training,'[dB]')
-        print('MSE after training start:', self.MSE_states_after_training,'[dB]')
 

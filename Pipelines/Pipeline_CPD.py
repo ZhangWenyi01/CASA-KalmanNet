@@ -11,6 +11,8 @@ from Plot import Plot_extended
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import os
+from tqdm import tqdm
+from tqdm import trange
 
 class Pipeline_CPD:
 

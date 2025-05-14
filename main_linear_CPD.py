@@ -215,7 +215,7 @@ unsupervised_pipeline.setKNet('KNet')
 unsupervised_pipeline.setssModel(sys_model_online)
 args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
-unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD,train_input,train_target)
+unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD)
 
 
 
