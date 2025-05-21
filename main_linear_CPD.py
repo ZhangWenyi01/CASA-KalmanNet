@@ -9,6 +9,7 @@ from Simulations.Linear_CPD.parameters import F_gen,F_CV,H_identity,H_onlyPos,\
    m,m_cv,Q_afterCPD
 
 from Filters.KalmanFilter_test import KFTest
+from Filters.Linear_KF import KalmanFilter
 
 from KNet.KalmanNet_nn import KalmanNetNN
 
@@ -158,9 +159,6 @@ KNet_Pipeline.setTrainingParams(args)
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
                             args.T_test,Q_afterCPD=Q_gen*500)
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
-utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
-[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
-
 # Build Neural Network
 CPDNet_model = CPDNetNN(args.sample_interval, 1, 1, 1)
 print("Number of trainable parameters for CPDNet pass 1:",sum(p.numel() for p in CPDNet_model.parameters() if p.requires_grad))
@@ -170,10 +168,11 @@ CPD_Pipeline.setModel(CPDNet_model)
 CPD_Pipeline.setssModel(sys_model_CPD)
 CPD_Pipeline.setTrainingParams(args)
 
+utils.DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
+[train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
 print("Generate CPD dataset with Known Random Initial State")
 ## Test Neural Network
 print("Compute Loss on All States (if false, loss on position only):", Loss_On_AllState)
-# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,KNet_out,RunTime,error,index] = KNet_Pipeline.CPD_Dataset(sys_model, test_input_CPD, test_target_CPD, path_results,MaskOnState=not Loss_On_AllState,randomInit=True,test_init=test_init_CPD)
 KNet_Pipeline.CPD_Dataset(sys_model, train_input_CPD, train_target_CPD,cv_input_CPD,cv_target_CPD,test_input_CPD,test_target_CPD, path_results,path_results_CPD,MaskOnState=not Loss_On_AllState,randomInit=True,train_init=train_init_CPD,test_init=test_init_CPD,cv_init=cv_init_CPD)
 
 # Load index_error data
@@ -209,38 +208,17 @@ y_ture_cv = index_error_data['y_ture_cv']
 # Load CPDNet model
 sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
 sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
+sys_model_KF = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
+sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
+
 unsupervised_pipeline = Pipeline_Unsupervised()
 unsupervised_pipeline.setCPDNet('CPDNet')
 unsupervised_pipeline.setKNet('KNet')
 unsupervised_pipeline.setssModel(sys_model_online)
 args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
+# Kalman Filter processing
+[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out] = KFTest(args, sys_model_KF, y_ture_train, x_ture_train, allStates=Loss_On_AllState)
+
+
 unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD)
-
-
-
-# cpd_test = utils.cpd_dataset_process(y_estimation_cv,y_ture_cv)
-# compare = train_input
-# # Plot compare and cpd_test curves in two subplots
-# plt.figure(figsize=(12, 8))
-
-# # First subplot for compare
-# plt.subplot(2, 1, 1)
-# plt.plot(compare[0,0,:].cpu().detach().numpy(), label="Compare", color="blue")
-# plt.xlabel("Time Steps")
-# plt.ylabel("Values")
-# plt.title("Compare Curve")
-# plt.legend()
-# plt.grid()
-
-# # Second subplot for cpd_test
-# plt.subplot(2, 1, 2)
-# plt.plot(cpd_test[0,0,:].cpu().detach().numpy(), label="CPD Test", color="orange")
-# plt.xlabel("Time Steps")
-# plt.ylabel("Values")
-# plt.title("CPD Test Curve")
-# plt.legend()
-# plt.grid()
-
-# plt.tight_layout()
-# plt.show()
