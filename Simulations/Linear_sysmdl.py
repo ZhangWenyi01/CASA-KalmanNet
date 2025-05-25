@@ -13,11 +13,13 @@
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
+import random
 
 class SystemModel:
 
     def __init__(self, F, Q, H, R, T, T_test, prior_Q=None, prior_Sigma=None, 
-                 prior_S=None,Q_afterCPD=None):
+                 prior_S=None, Q_afterCPD=None, F_afterCPD=None, H_afterCPD=None, R_afterCPD=None,
+                 param_to_change='Q'):
 
         ####################
         ### Motion Model ###
@@ -64,6 +66,24 @@ class SystemModel:
         else:
             self.prior_S = prior_S
         
+        # Add new parameters for post-change point values
+        if F_afterCPD is None:
+            self.F_afterCPD = self.F
+        else:
+            self.F_afterCPD = F_afterCPD
+            
+        if H_afterCPD is None:
+            self.H_afterCPD = self.H
+        else:
+            self.H_afterCPD = H_afterCPD
+            
+        if R_afterCPD is None:
+            self.R_afterCPD = self.R
+        else:
+            self.R_afterCPD = R_afterCPD
+
+        # 添加要改变的参数属性
+        self.param_to_change = param_to_change
 
     def f(self, x):
         batched_F = self.F.to(x.device).view(1,self.F.shape[0],self.F.shape[1]).expand(x.shape[0],-1,-1)
@@ -330,45 +350,77 @@ class SystemModel:
             change_index = torch.randint(20, T-40, (1,)).item()
             print('change_index:', change_index)
             self.changepoint = change_index
+            
+            # 使用指定的参数而不是随机选择
+            print(f'Changing parameter: {self.param_to_change}')
+            
             for t in range(0, T):
                 ########################
                 #### State Evolution ###
                 ########################   
                 if torch.equal(self.Q,torch.zeros(self.m,self.m)):# No noise
-                    xt = self.f(self.x_prev)
+                    # Use appropriate F based on change point
+                    if t >= change_index and self.param_to_change == 'F':
+                        xt = self.F_afterCPD.matmul(self.x_prev)
+                    else:
+                        xt = self.F.matmul(self.x_prev)
                 elif self.m == 1: # 1 dim noise
-                    xt = self.f(self.x_prev)
-                    eq = torch.normal(mean=torch.zeros(size), std=self.Q).view(size,1,1)
-                    # Additive Process Noise
+                    # Use appropriate F based on change point
+                    if t >= change_index and self.param_to_change == 'F':
+                        xt = self.F_afterCPD.matmul(self.x_prev)
+                    else:
+                        xt = self.F.matmul(self.x_prev)
+                        #xt = self.f(self.x_prev)
+                        
+                    # Use appropriate Q based on change point
+                    if t >= change_index and self.param_to_change == 'Q':
+                        eq = torch.normal(mean=torch.zeros(size), std=self.Q_afterCPD).view(size,1,1)
+                    else:
+                        eq = torch.normal(mean=torch.zeros(size), std=self.Q).view(size,1,1)
                     xt = torch.add(xt,eq)
                 else:
-                    xt = self.f(self.x_prev)
-                    mean = torch.zeros([size, self.m])       
-                    if t >= change_index:       
+                    # Use appropriate F based on change point
+                    if t >= change_index and self.param_to_change == 'F':
+                        xt = self.F_afterCPD.matmul(self.x_prev)
+                    else:
+                        xt = self.F.matmul(self.x_prev)
+                        
+                    mean = torch.zeros([size, self.m])
+                    # Use appropriate Q based on change point
+                    if t >= change_index and self.param_to_change == 'Q':
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q_afterCPD)
                     else:
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q)
                     eq = distrib.rsample().view(size,self.m,1)
-                    # Additive Process Noise
                     xt = torch.add(xt,eq)
 
                 ################
                 ### Emission ###
                 ################
+                # Use appropriate H based on change point
+                if t >= change_index and self.param_to_change == 'H':
+                    yt = self.H_afterCPD.matmul(xt)
+                else:
+                    yt = self.H.matmul(xt)
+                    
                 # Observation Noise
                 if torch.equal(self.R,torch.zeros(self.n,self.n)):# No noise
-                    yt = self.h(xt)
+                    pass
                 elif self.n == 1: # 1 dim noise
-                    yt = self.h(xt)
-                    er = torch.normal(mean=torch.zeros(size), std=self.R).view(size,1,1)
-                    # Additive Observation Noise
+                    # Use appropriate R based on change point
+                    if t >= change_index and self.param_to_change == 'R':
+                        er = torch.normal(mean=torch.zeros(size), std=self.R_afterCPD).view(size,1,1)
+                    else:
+                        er = torch.normal(mean=torch.zeros(size), std=self.R).view(size,1,1)
                     yt = torch.add(yt,er)
-                else:  
-                    yt = self.H.matmul(xt)
-                    mean = torch.zeros([size,self.n])            
-                    distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R)
-                    er = distrib.rsample().view(size,self.n,1)          
-                    # Additive Observation Noise
+                else:
+                    mean = torch.zeros([size,self.n])
+                    # Use appropriate R based on change point
+                    if t >= change_index and self.param_to_change == 'R':
+                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R_afterCPD)
+                    else:
+                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R)
+                    er = distrib.rsample().view(size,self.n,1)
                     yt = torch.add(yt,er)
 
                 ########################
@@ -385,7 +437,6 @@ class SystemModel:
                 ### Save Current to Previous ###
                 ################################
                 self.x_prev = xt
-
 
     def sampling(self, q, r, gain):
 

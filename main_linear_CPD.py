@@ -157,7 +157,13 @@ KNet_Pipeline.setTrainingParams(args)
 # and used to generate CPD dataset for training CPDNet. Change point inclued in 
 # the dataset.
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
-                            args.T_test,Q_afterCPD=Q_gen*500)
+                           args.T_test,
+                           Q_afterCPD=Q_gen*300,  
+                           F_afterCPD=F_gen*1.1,    
+                           H_afterCPD=H_onlyPos*2,
+                           R_afterCPD=R_onlyPos*2,
+                           param_to_change='F'    
+                           )
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
 # Build Neural Network
 CPDNet_model = CPDNetNN(args.sample_interval, 1, 1, 1)
@@ -202,7 +208,7 @@ y_estimation_cv = index_error_data['y_estimation_cv']
 y_ture_cv = index_error_data['y_ture_cv']
 
 # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
-# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)
+[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)
 
 # Unsupervised stage initialization
 # Load CPDNet model
