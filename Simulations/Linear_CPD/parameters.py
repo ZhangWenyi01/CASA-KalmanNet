@@ -20,6 +20,10 @@ F_gen = torch.tensor([[1, delta_t_gen,0.5*delta_t_gen**2],
                   [0,       1,       delta_t_gen],
                   [0,       0,         1]]).float()
 
+F_after = torch.tensor([[1.01, delta_t_gen,0.5*delta_t_gen**2],
+                  [0,       1,       delta_t_gen],
+                  [0,       0,         1]]).float()
+
 F_CV = torch.tensor([[1, delta_t_gen],
                      [0,           1]]).float()              
 

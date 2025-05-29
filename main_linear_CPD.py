@@ -6,7 +6,7 @@ import Simulations.config as config
 import Simulations.utils as utils
 from Simulations.Linear_CPD.parameters import F_gen,F_CV,H_identity,H_onlyPos,\
    Q_gen,Q_CV,R_3,R_2,R_onlyPos,\
-   m,m_cv,Q_afterCPD
+   m,m_cv,Q_afterCPD,F_after
 
 from Filters.KalmanFilter_test import KFTest
 from Filters.Linear_KF import KalmanFilter
@@ -158,11 +158,11 @@ KNet_Pipeline.setTrainingParams(args)
 # the dataset.
 sys_model_CPD = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, 
                            args.T_test,
-                           Q_afterCPD=Q_gen*300,  
-                           F_afterCPD=F_gen*1.1,    
-                           H_afterCPD=H_onlyPos*2,
-                           R_afterCPD=R_onlyPos*2,
-                           param_to_change='F'    
+                           Q_afterCPD=Q_gen*500,  
+                           F_afterCPD=F_gen*1.05,    
+                           H_afterCPD=H_onlyPos*0.95,
+                           R_afterCPD=R_onlyPos*1.5,
+                           param_to_change='H'    
                            )
 sys_model_CPD.InitSequence(m1x_0, m2x_0_gen)# x0 and P0
 # Build Neural Network
@@ -210,21 +210,21 @@ y_ture_cv = index_error_data['y_ture_cv']
 # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, MaskOnState=not Train_Loss_On_AllState,cv_init=cv_init_CPD)
 [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test, MaskOnState=not Train_Loss_On_AllState)
 
-# Unsupervised stage initialization
-# Load CPDNet model
-sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
-sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
-sys_model_KF = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
-sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
+# # Unsupervised stage initialization
+# # Load CPDNet model
+# sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
+# sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
+# sys_model_KF = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
+# sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
 
-unsupervised_pipeline = Pipeline_Unsupervised()
-unsupervised_pipeline.setCPDNet('CPDNet')
-unsupervised_pipeline.setKNet('KNet')
-unsupervised_pipeline.setssModel(sys_model_online)
-args.n_batch = 1
-unsupervised_pipeline.setTrainingParams(args)
-# Kalman Filter processing
-[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out] = KFTest(args, sys_model_KF, y_ture_train, x_ture_train, allStates=Loss_On_AllState)
+# unsupervised_pipeline = Pipeline_Unsupervised()
+# unsupervised_pipeline.setCPDNet('CPDNet')
+# unsupervised_pipeline.setKNet('KNet')
+# unsupervised_pipeline.setssModel(sys_model_online)
+# args.n_batch = 1
+# unsupervised_pipeline.setTrainingParams(args)
+# # Kalman Filter processing
+# [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out] = KFTest(args, sys_model_KF, y_ture_train, x_ture_train, allStates=Loss_On_AllState)
 
 
-unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD)
+# unsupervised_pipeline.NNTrain(sys_model_online,y_ture_train,x_ture_train,train_init_CPD)

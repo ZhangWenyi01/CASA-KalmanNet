@@ -83,26 +83,6 @@ def DataGenCPD(args, SysModel_data, fileName):
     test_target = SysModel_data.Target
     test_init = SysModel_data.m1x_0_batch #size: N_T x m x 1
     
-    
-    # changeindex = SysModel_data.changepoint
-    # # Assuming train_input and train_target are tensors with shape [time, features]
-    # time = range(100)
-    # x = time
-    # y_input = torch.squeeze(test_input[0:1,:,:]).numpy()  # Assuming we are plotting the first feature
-    # y_target = torch.squeeze(test_target[0:1,0:1, :]).numpy()  # Assuming we are plotting the first feature
-
-    # # Plot the train_input and train_target
-    # plt.figure()
-    # plt.plot(x[:changeindex], y_input[:changeindex], marker='o', label='Train Input (before change)')
-    # plt.plot(x[changeindex:], y_input[changeindex:], marker='o', label='Train Input (after change)', color='red')
-    # plt.plot(x[:changeindex], y_target[:changeindex], marker='x', label='Train Target (before change)')
-    # plt.plot(x[changeindex:], y_target[changeindex:], marker='x', label='Train Target (after change)', color='green')
-    # plt.title('Trajectory of Data in CPD.pt')
-    # plt.xlabel('Time')
-    # plt.ylabel('Value')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
     ### length mask ###
     if args.randomLength:
         test_lengthMask = SysModel_data.lengthMask
@@ -175,8 +155,6 @@ def Short_Traj_Split(data_target, data_input, T):### Random Init is automaticall
     input = data_input[:,:,1:]
     init = data_target[:,:,0]
     return [target, input, init]
-
-# Function to process data for CPD
 
 # Calculate MSE over sample intervals
 def calculate_mse_over_intervals(tanh_index, sample_interval):

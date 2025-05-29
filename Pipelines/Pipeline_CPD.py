@@ -87,39 +87,54 @@ class Pipeline_CPD:
         
         for t in range(0, SysModel.T_test-self.sample_interval+1):
             x_out_test[:,:, t] = self.model(test_input[:,:, t:t+self.sample_interval])
-        
-        # Randomly select a batch
-        # batch_idx = random.randint(0, self.N_T - 1)
-        batch_idx = 20
 
-        # Plot the predicted trajectory vs actual trajectory
-        time_steps = torch.arange(SysModel.T_test).cpu().detach().numpy()
-        plt.subplot(1, 2, 1)
-        plt.plot(x_out_test[batch_idx, 0, :].detach().cpu().numpy(), label="Predicted CPD probability", linestyle='--')
-        plt.plot(test_target[batch_idx, 0, :].detach().cpu().numpy(), label="Actual CPD probability", linestyle='-')
-        plt.axvline(x=changepoint, color='green', linestyle='--', label=f'Changepoint ({changepoint})')
+        # Prepare data for saving
+        plot_data = {
+            'predicted_cpd': x_out_test.detach().cpu().numpy(),
+            'actual_cpd': test_target.detach().cpu().numpy(),
+            'estimation_state': x_estimation_cv.cpu().detach().numpy(),
+            'true_state': x_ture_cv.cpu().detach().numpy(),
+            'estimation_y': y_estimation_cv.cpu().detach().numpy(),
+            'true_y': y_ture_cv.cpu().detach().numpy(),
+            'changepoint': changepoint
+        }
+
+        batch_idx = 10
+        plt.figure(figsize=(10, 7))
+        
+        # Plot CPD results
+        plt.subplot(2, 1, 1)
+        plt.plot(plot_data['predicted_cpd'][batch_idx, 0, :-5], label="Predicted CPD probability", linestyle='--')
+        plt.plot(plot_data['actual_cpd'][batch_idx, 0, :-5], label="Actual CPD probability", linestyle='-')
+        plt.axvline(x=plot_data['changepoint'], color='green', linestyle='--', 
+                    label=f'Changepoint ({plot_data["changepoint"]})')
         plt.xlabel("Time Steps")
         plt.ylabel("Value")
-        plt.title(f"Trajectory Comparison for Batch {batch_idx}")
         plt.legend()
         plt.grid()
 
-        plt.subplot(1, 2, 2)
-        plt.plot(x_estimation_cv[batch_idx, 0, :].cpu().detach().numpy(),
-            label='estimation state', color='red')
-        plt.plot(x_ture_cv[batch_idx, 0, :].cpu().detach().numpy(),
-            label='true state', color='blue')
-        plt.plot(y_estimation_cv[batch_idx, 0, :].cpu().detach().numpy(),
-            label='estimation y', color='black')
-        plt.plot(y_ture_cv[batch_idx, 0, :].cpu().detach().numpy(),
-            label='true y')
-        plt.axvline(x=changepoint, color='green', linestyle='--', label=f'Changepoint ({changepoint})')
-        plt.title('2D Curve: x_out_train, x_out_train_prior,y_train_estimation, train_target (Random Batch)')
+        # Plot state and observation results
+        plt.subplot(2, 1, 2)
+        plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], label='estimation state', color='red')
+        plt.plot(plot_data['true_state'][batch_idx, 0, :-5], label='true state', color='blue')
+        plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], label='estimation y', color='black')
+        plt.plot(plot_data['true_y'][batch_idx, 0, :-5], label='true y')
+        plt.axvline(x=plot_data['changepoint'], color='green', linestyle='--', 
+                    label=f'Changepoint ({plot_data["changepoint"]})')
         plt.xlabel('Time Step')
         plt.ylabel('Value (Dimension 1)')
         plt.legend()
-        plt.show()
         
+        plt.tight_layout()
+        plt.show()
+
+        # Create directory if it doesn't exist
+        save_dir = 'plot_data'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        # Save data to file
+        torch.save(plot_data, os.path.join(save_dir, f'CPDNet_results_H_0.95.pt'))
+
         # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
         x_out_test_compared = (x_out_test > threshold).float()
         end = time.time()
