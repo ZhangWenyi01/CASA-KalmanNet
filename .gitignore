@@ -2,3 +2,4 @@ __pycache__/
 CPDNet/runs/
 runs/
 *.pt
+ExperimentsPlan.md
