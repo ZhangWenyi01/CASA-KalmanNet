@@ -59,6 +59,7 @@ def DataGenCPD(args, SysModel_data, fileName):
     train_target = SysModel_data.Target
     ### init conditions ###
     train_init = SysModel_data.m1x_0_batch #size: N_E x m x 1
+    train_ChangePoint = SysModel_data.changepoint
     ### length mask ###
     if args.randomLength:
         train_lengthMask = SysModel_data.lengthMask
@@ -71,6 +72,7 @@ def DataGenCPD(args, SysModel_data, fileName):
     cv_input = SysModel_data.Input
     cv_target = SysModel_data.Target
     cv_init = SysModel_data.m1x_0_batch #size: N_CV x m x 1
+    cv_ChangePoint = SysModel_data.changepoint
     ### length mask ###
     if args.randomLength:
         cv_lengthMask = SysModel_data.lengthMask
@@ -81,9 +83,85 @@ def DataGenCPD(args, SysModel_data, fileName):
     SysModel_data.GenerateBatchCPD(args, args.N_T, args.T_test, randomInit=args.randomInit_test)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
+    test_ChangePoint = SysModel_data.changepoint
     test_init = SysModel_data.m1x_0_batch #size: N_T x m x 1
+    # import matplotlib.pyplot as plt
+    # import numpy as np
     
-    ### length mask ###
+    # # Randomly select a batch
+    # i = np.random.randint(0, test_target.shape[0])
+    
+    # # Get changepoint index
+    # change_index = SysModel_data.changepoint
+    
+    # # Create figure for plotting
+    # plt.figure(figsize=(10, 6))
+    
+    # # Plot target trajectory
+    # x_target = test_target[i, 0, :].cpu().numpy()
+    
+    # # Plot target trajectory with different styles before and after changepoint
+    # plt.plot(x_target, 
+    #         color='blue', alpha=0.5, label='Target (before CP)')
+    
+    # # Plot input observations
+    # x_input = test_input[i, 0, :].cpu().detach().numpy()
+    
+    # # Plot input trajectory with different styles before and after changepoint
+    # plt.plot(x_input, 
+    #         color='green', alpha=0.3, label='Input ')
+    
+    # plt.title(f'Test Data Trajectories (Batch {i})')
+    # plt.xlabel('X Position')
+    # plt.ylabel('Y Position')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
+    # plt.show()
+    
+    
+    # # Plot 3D trajectories for test data
+    # import matplotlib.pyplot as plt
+    # from mpl_toolkits.mplot3d import Axes3D
+    # import numpy as np
+    
+    # # Create figure for plotting
+    # fig = plt.figure(figsize=(10, 8))
+    # ax = fig.add_subplot(111, projection='3d')
+    
+    # # Randomly select a batch
+    # i = np.random.randint(0, test_target.shape[0])
+    
+    # # Get changepoint index
+    # change_index = SysModel_data.changepoint
+    
+    # # Plot target trajectories
+    # x = test_target[i, 0, :].cpu().numpy()
+    # y = test_target[i, 1, :].cpu().numpy()
+    # z = test_target[i, 2, :].cpu().numpy()
+    
+    # # Plot target trajectory with different styles before and after changepoint
+    # ax.plot(x[:change_index], y[:change_index], z[:change_index], 
+    #         color='blue', alpha=0.5, label='Target (before CP)')
+    # ax.plot(x[change_index-1:], y[change_index-1:], z[change_index-1:], 
+    #         color='blue', alpha=0.5, linestyle='--', label='Target (after CP)')
+    
+    # # Plot input observations
+    # x_in = test_input[i, 0, :].cpu().numpy()
+    # y_in = test_input[i, 1, :].cpu().numpy()
+    # z_in = test_input[i, 2, :].cpu().numpy()
+    
+    # # Plot input trajectory with different styles before and after changepoint
+    # ax.plot(x_in[:change_index], y_in[:change_index], z_in[:change_index], 
+    #         color='green', alpha=0.3, label='Input (before CP)')
+    # ax.plot(x_in[change_index-1:], y_in[change_index-1:], z_in[change_index-1:], 
+    #         color='green', alpha=0.3, linestyle='--', label='Input (after CP)')
+    
+    # ax.set_title(f'Test Data Trajectories (Batch {i})')
+    # ax.legend()
+    # plt.tight_layout()
+    # plt.show()
+    # ### length mask ###
     if args.randomLength:
         test_lengthMask = SysModel_data.lengthMask
 
@@ -91,9 +169,9 @@ def DataGenCPD(args, SysModel_data, fileName):
     ### Save Data ###
     #################
     if(args.randomLength):
-        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init, train_lengthMask,cv_lengthMask,test_lengthMask], fileName)
+        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init, train_lengthMask,cv_lengthMask,test_lengthMask,train_ChangePoint,cv_ChangePoint,test_ChangePoint], fileName)
     else:
-        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init], fileName)
+        torch.save([train_input, train_target, cv_input, cv_target, test_input, test_target,train_init, cv_init, test_init,train_ChangePoint,cv_ChangePoint,test_ChangePoint], fileName)
         
 
 def DecimateData(all_tensors, t_gen,t_mod, offset=0):
@@ -196,3 +274,19 @@ def cpd_dataset_process_single(input_one:torch.Tensor,input_two:torch.Tensor,
     transformed_errors =  torch.tanh(scale_param*transformed_errors)**2
 
     return transformed_errors
+
+def cpd_dataset_process_lor(input_one:torch.Tensor,input_two:torch.Tensor,
+                        sample_interval:int = 5,
+                        scale_param:int = 19)->torch.Tensor:
+    # Calculate absolute errors
+    abs_errors = torch.mean(torch.abs(input_one - input_two), dim=1, keepdim=True)
+    # Apply sigmoid transformation, minus 0.5 to center around 0
+    transformed_errors = torch.sigmoid(abs_errors) - 0.5
+    # Apply tanh transformation, scale_param is a hyperparameter to 
+    # control the range
+    transformed_errors =  torch.tanh(scale_param*transformed_errors)
+    
+    # Calculate MSE over sample intervals
+    mse_result = calculate_mse_over_intervals(transformed_errors, 
+                                              sample_interval)
+    return mse_result

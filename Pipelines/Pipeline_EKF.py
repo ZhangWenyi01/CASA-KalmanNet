@@ -287,10 +287,10 @@ class Pipeline_EKF:
         else:
             self.model = torch.load(path_results+'best-model.pt', map_location=self.device,weights_only=False) 
 
-        self.N_T = test_input.shape[0]
+        self.N_E = test_input.shape[0]
         SysModel.T_test = test_input.size()[-1]
-        self.MSE_test_linear_arr = torch.zeros([self.N_T])
-        x_out_test = torch.zeros([self.N_T, SysModel.m,SysModel.T_test]).to(self.device)
+        self.MSE_test_linear_arr = torch.zeros([self.N_E])
+        x_out_test = torch.zeros([self.N_E, SysModel.m,SysModel.T_test]).to(self.device)
 
         if MaskOnState:
             mask = torch.tensor([True,False,False])
@@ -302,7 +302,7 @@ class Pipeline_EKF:
 
         # Test mode
         self.model.eval()
-        self.model.batch_size = self.N_T
+        self.model.batch_size = self.N_E
         # Init Hidden State
         self.model.init_hidden_KNet()
         torch.no_grad()
@@ -312,7 +312,7 @@ class Pipeline_EKF:
         if (randomInit):
             self.model.InitSequence(test_init, SysModel.T_test)               
         else:
-            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)         
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_E,1,1), SysModel.T_test)         
         
         for t in range(0, SysModel.T_test):
             x_out_test[:,:, t] = torch.squeeze(self.model(torch.unsqueeze(test_input[:,:, t],2)))
@@ -321,7 +321,7 @@ class Pipeline_EKF:
         t = end - start
 
         # MSE loss
-        for j in range(self.N_T):# cannot use batch due to different length and std computation  
+        for j in range(self.N_E):# cannot use batch due to different length and std computation  
             if(MaskOnState):
                 if self.args.randomLength:
                     self.MSE_test_linear_arr[j] = loss_fn(x_out_test[j,mask,test_lengthMask[j]], test_target[j,mask,test_lengthMask[j]]).item()
@@ -372,13 +372,14 @@ class Pipeline_EKF:
         else:
             self.model = torch.load(path_results+'best-model.pt', map_location=self.device,weights_only=False) 
 
-        self.N_T = train_input.shape[0]
+        self.N_E = train_input.shape[0]
         self.N_CV = cv_input.shape[0]
+        self.N_T = test_input.shape[0]
         SysModel.T_test = train_input.size()[-1]
         SysModel.T_cv = cv_input.size()[-1]
         
-        x_out_train = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
-        x_out_train_prior = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
+        x_out_train = torch.zeros([self.N_E, 1, SysModel.T_test]).to(self.device)
+        x_out_train_prior = torch.zeros([self.N_E, 1, SysModel.T_test]).to(self.device)
         
         x_out_cv = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
         x_out_cv_prior = torch.zeros([self.N_CV, 1, SysModel.T_cv]).to(self.device)
@@ -386,7 +387,7 @@ class Pipeline_EKF:
         x_out_test = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
         x_out_test_prior = torch.zeros([self.N_T, 1, SysModel.T_test]).to(self.device)
         
-        y_train_estimation = torch.zeros([self.N_T, SysModel.n, SysModel.T_test]).to(self.device)
+        y_train_estimation = torch.zeros([self.N_E, SysModel.n, SysModel.T_test]).to(self.device)
         
         y_cv_estimation = torch.zeros([self.N_CV, SysModel.n, SysModel.T_cv]).to(self.device)
         
@@ -409,12 +410,12 @@ class Pipeline_EKF:
         test_target_plt = test_target
 
         # Process train data
-        self.model.batch_size = self.N_T
+        self.model.batch_size = self.N_E
         self.model.init_hidden_KNet()  # Reset hidden state
         if (randomInit):
             self.model.InitSequence(train_init, SysModel.T_test)               
         else:
-            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_E,1,1), SysModel.T_test)
         
         for t in range(0, SysModel.T_test):
             # output, prior, y = self.model(torch.unsqueeze(train_input[:,:, t],2))

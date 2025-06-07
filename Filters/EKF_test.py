@@ -63,6 +63,6 @@ def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
     # Print Run Time
     print("Inference Time:", t)
 
-    return [MSE_EKF_linear_arr, MSE_EKF_linear_avg, MSE_EKF_dB_avg, KG_array, EKF_out]
+    # return [MSE_EKF_linear_arr, MSE_EKF_linear_avg, MSE_EKF_dB_avg, KG_array, EKF_out]
 
 

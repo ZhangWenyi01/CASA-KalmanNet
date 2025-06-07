@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 import os
 import csv
+from Simulations.utils import cpd_dataset_process_lor
 
 class Pipeline_EKF:
 
@@ -47,6 +48,7 @@ class Pipeline_EKF:
         self.alpha = args.alpha # Composition loss factor
         # MSE LOSS Function
         self.loss_fn = nn.MSELoss(reduction='mean')
+        self.sample_interval = args.sample_interval
 
         # Use the optim package to define an Optimizer that will update the weights of
         # the model for us. Here we will use Adam; the optim package contains many other
@@ -198,65 +200,6 @@ class Pipeline_EKF:
             # parameters
             self.optimizer.step()
             # self.scheduler.step(self.MSE_cv_dB_epoch[ti])
-
-            #################################
-            ### Validation Sequence Batch ###
-            #################################
-
-            # Cross Validation Mode
-            self.model.eval()
-            self.model.batch_size = self.N_CV
-            # Init Hidden State
-            self.model.init_hidden_KNet()
-            with torch.no_grad():
-
-                SysModel.T_test = cv_input.size()[-1] # T_test is the maximum length of the CV sequences
-
-                x_out_cv_batch = torch.empty([self.N_CV, SysModel.m, SysModel.T_test]).to(self.device)
-                
-                # Init Sequence
-                if(randomInit):
-                    if(cv_init==None):
-                        self.model.InitSequence(\
-                        SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_test)
-                    else:
-                        self.model.InitSequence(cv_init, SysModel.T_test)                       
-                else:
-                    self.model.InitSequence(\
-                        SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_test)
-
-                for t in range(0, SysModel.T_test):
-                    x_out_cv_batch[:, :, t] = torch.squeeze(self.model(torch.unsqueeze(cv_input[:, :, t],2)))
-                
-                # Compute CV Loss
-                MSE_cvbatch_linear_LOSS = 0
-                if(MaskOnState):
-                    if self.args.randomLength:
-                        for index in range(self.N_CV):
-                            MSE_cv_linear_LOSS[index] = self.loss_fn(x_out_cv_batch[index,mask,cv_lengthMask[index]], cv_target[index,mask,cv_lengthMask[index]])
-                        MSE_cvbatch_linear_LOSS = torch.mean(MSE_cv_linear_LOSS)
-                    else:          
-                        MSE_cvbatch_linear_LOSS = self.loss_fn(x_out_cv_batch[:,mask,:], cv_target[:,mask,:])
-                else:
-                    if self.args.randomLength:
-                        for index in range(self.N_CV):
-                            MSE_cv_linear_LOSS[index] = self.loss_fn(x_out_cv_batch[index,:,cv_lengthMask[index]], cv_target[index,:,cv_lengthMask[index]])
-                        MSE_cvbatch_linear_LOSS = torch.mean(MSE_cv_linear_LOSS)
-                    else:
-                        MSE_cvbatch_linear_LOSS = self.loss_fn(x_out_cv_batch, cv_target)
-
-                # dB Loss
-                self.MSE_cv_linear_epoch[ti] = MSE_cvbatch_linear_LOSS.item()
-                self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
-                
-                # Add validation loss to TensorBoard
-                self.writer.add_scalar('Loss/validation_dB', self.MSE_cv_dB_epoch[ti], ti)
-                self.writer.add_scalar('Loss/train_dB', self.MSE_train_dB_epoch[ti], ti)    
-                if (self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt):
-                    self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
-                    self.MSE_cv_idx_opt = ti
-                    
-                    torch.save(self.model, path_results + 'lor-best-model.pt')
 
             ########################
             ### Training Summary ###
@@ -483,3 +426,138 @@ class Pipeline_EKF:
                                 self.MSE_test_dB_avg, self.MSE_cv_dB_epoch, self.MSE_train_dB_epoch)
 
         self.Plot.NNPlot_Hist(MSE_KF_linear_arr, self.MSE_test_linear_arr)
+
+    def CPD_Dataset(self, SysModel,train_input, train_target, cv_input, cv_target,test_input,test_target, path_results, path_dataset, MaskOnState=False,\
+        randomInit=False,train_init=None, test_init=None, load_model=False, load_model_path=None,\
+            test_lengthMask=None,cv_init=None,scale_param = 8):
+        # Load model
+        if load_model:
+            self.model = torch.load(load_model_path, map_location=self.device,weights_only=False) 
+        else:
+            self.model = torch.load(path_results+'lor-best-model.pt', map_location=self.device,weights_only=False) 
+
+        self.N_T = train_input.shape[0]
+        self.N_CV = cv_input.shape[0]
+        self.N_Test = test_input.shape[0]
+        SysModel.T_test = test_input.size()[-1]
+        SysModel.T_cv = cv_input.size()[-1]
+        
+        x_out_train = torch.zeros([self.N_T, SysModel.m, SysModel.T]).to(self.device)
+        x_out_train_prior = torch.zeros([self.N_T, SysModel.m, SysModel.T]).to(self.device)
+        
+        x_out_cv = torch.zeros([self.N_CV, SysModel.m, SysModel.T_cv]).to(self.device)
+        x_out_cv_prior = torch.zeros([self.N_CV, SysModel.m, SysModel.T_cv]).to(self.device)
+        
+        x_out_test = torch.zeros([self.N_Test, SysModel.m, SysModel.T_test]).to(self.device)
+        x_out_test_prior = torch.zeros([self.N_Test, SysModel.m, SysModel.T_test]).to(self.device)
+        
+        y_train_estimation = torch.zeros([self.N_T, SysModel.n, SysModel.T]).to(self.device)
+        
+        y_cv_estimation = torch.zeros([self.N_CV, SysModel.n, SysModel.T_cv]).to(self.device)
+        
+        y_test_estimation = torch.zeros([self.N_Test, SysModel.n, SysModel.T_test]).to(self.device)
+
+
+        # Test mode
+        self.model.eval()
+        torch.no_grad()
+        
+        train_input_plt = train_input
+        train_target_plt = train_target
+        cv_input_plt = cv_input
+        cv_target_plt = cv_target
+        test_input_plt = test_input
+        test_target_plt = test_target
+
+        # Process train data
+        self.model.batch_size = self.N_T
+        self.model.init_hidden_KNet()  # Reset hidden state
+        if (randomInit):
+            self.model.InitSequence(train_init, SysModel.T)               
+        else:
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T)
+        
+        for t in range(0, SysModel.T):
+            output = self.model(torch.unsqueeze(train_input[:,:, t],2))
+            x_out_train[:,:, t] = torch.squeeze(output, dim=2)
+            x_out_train_prior[:,:, t] = torch.squeeze(self.model.m1x_prior,dim=2)
+            y_train_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
+
+        
+        # Process cv data
+        self.model.batch_size = self.N_CV
+        self.model.init_hidden_KNet()  # Reset hidden state
+        if (randomInit):
+            self.model.InitSequence(cv_init, SysModel.T_cv)               
+        else:
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_CV,1,1), SysModel.T_cv)
+        for t in range(0, SysModel.T_cv):
+            output = self.model(torch.unsqueeze(cv_input[:,:, t],2))
+            x_out_cv[:,:, t] = torch.squeeze(output,dim=2)
+            x_out_cv_prior[:,:, t] = torch.squeeze(self.model.m1x_prior,dim=2)
+            y_cv_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
+            
+        # Process test data
+        self.model.batch_size = self.N_Test
+        self.model.init_hidden_KNet()  # Reset hidden state
+        if (randomInit):
+            self.model.InitSequence(test_init, SysModel.T_test)
+        else:
+            self.model.InitSequence(SysModel.m1x_0.reshape(1,SysModel.m,1).repeat(self.N_T,1,1), SysModel.T_test)
+        for t in range(0, SysModel.T_test):
+            output = self.model(torch.unsqueeze(test_input[:,:, t],2))
+            x_out_test[:,:, t] = torch.squeeze(output,dim=2)
+            x_out_test_prior[:,:, t] = torch.squeeze(self.model.m1x_prior,dim=2)
+            y_test_estimation[:,:, t] = torch.squeeze(self.model.m1y, dim=2)
+
+        
+        train_target = cpd_dataset_process_lor(x_out_train,
+                                                train_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+        train_input = cpd_dataset_process_lor(y_train_estimation,
+                                                train_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+        cv_target = cpd_dataset_process_lor(x_out_cv,
+                                                cv_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+        cv_input = cpd_dataset_process_lor(y_cv_estimation,
+                                                cv_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+        test_target = cpd_dataset_process_lor(x_out_test,
+                                                test_target,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+        test_input = cpd_dataset_process_lor(y_test_estimation,
+                                                test_input,
+                                                sample_interval=self.sample_interval,
+                                                scale_param=scale_param)
+       
+        # Save results
+        torch.save({
+            # Datasets used to train CPDNet
+            'train_input': train_input,
+            'train_target': train_target,
+            'cv_input': cv_input,
+            'cv_target': cv_target,
+            'test_input': test_input,
+            'test_target': test_target,
+            # Test datasets used from KalmanNet
+            'x_estimation_test': x_out_test,
+            'x_ture_test': test_target_plt,
+            'y_estimation_test': y_test_estimation,
+            'y_ture_test': test_input_plt,
+            # Train datasets used from KalmanNet
+            'x_estimation_train': x_out_train,
+            'x_ture_train': train_target_plt,
+            'y_estimation_train': y_train_estimation,
+            'y_ture_train': train_input_plt,
+            # Cross Validation datasets used from KalmanNet
+            'x_estimation_cv': x_out_cv,
+            'x_ture_cv': cv_target_plt,
+            'y_estimation_cv': y_cv_estimation,
+            'y_ture_cv': cv_input_plt
+        }, path_dataset + 'index_error.pt')

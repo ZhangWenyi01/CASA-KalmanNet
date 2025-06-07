@@ -99,7 +99,7 @@ class Pipeline_CPD:
             'changepoint': changepoint
         }
 
-        batch_idx = 10
+        batch_idx = 6
         plt.figure(figsize=(10, 7))
         
         # Plot CPD results
@@ -128,15 +128,15 @@ class Pipeline_CPD:
         plt.tight_layout()
         plt.show()
 
-        # Create directory if it doesn't exist
-        save_dir = 'plot_data'
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        # Save data to file
-        torch.save(plot_data, os.path.join(save_dir, f'CPDNet_results_H_0.95.pt'))
+        # # Create directory if it doesn't exist
+        # save_dir = 'plot_data'
+        # if not os.path.exists(save_dir):
+        #     os.makedirs(save_dir)
+        # # Save data to file
+        # torch.save(plot_data, os.path.join(save_dir, f'CPDNet_results_H_0.95.pt'))
 
-        # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
-        x_out_test_compared = (x_out_test > threshold).float()
+        # # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
+        # x_out_test_compared = (x_out_test > threshold).float()
         end = time.time()
         t = end - start
 
@@ -228,7 +228,7 @@ class Pipeline_CPD:
             self.model.batch_size = self.N_B
 
             # Init Training Batch tensors
-            y_training_batch = torch.zeros([self.N_B, SysModel.n, SysModel.T-self.sample_interval+1]).to(self.device)
+            y_training_batch = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
             train_target_batch = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
             x_out_training_batch = torch.zeros([self.N_B, 1, SysModel.T-self.sample_interval+1]).to(self.device)
             if self.args.randomLength:

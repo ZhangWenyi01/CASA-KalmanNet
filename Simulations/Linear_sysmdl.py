@@ -347,7 +347,7 @@ class SystemModel:
             xt = self.x_prev
 
             # Generate in a batched manner
-            change_index = torch.randint(20, T-40, (1,)).item()
+            change_index = torch.randint(10, T-20, (1,)).item()
             print('change_index:', change_index)
             self.changepoint = change_index
             
