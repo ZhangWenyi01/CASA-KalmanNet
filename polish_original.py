@@ -296,7 +296,6 @@ def EMKF(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihood=0.01, tol
 
                     # Check whether the updated estimate for Q is positive definite
                 if is_pos_def(Q_i) == False:
-                    print(f"Q NON-SPD at iteration {i}")
                     Q_i = force_SPD(Q_i)
 
                 Q = np.append(Q, [Q_i], 0)
@@ -325,8 +324,7 @@ def EMKF(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihood=0.01, tol
                     R_i = (A_5 - A_4 @ np.linalg.inv(A_3) @ A_4.T) / T
                 # Check whether the updated estimate of R is positive definite
                 if is_pos_def(R_i) == False:
-                    print(f"R_{i} NON-SPD")
-                R_i = force_SPD(R_i)
+                    R_i = force_SPD(R_i)
 
                 R = np.append(R, [R_i], axis=0)
 
@@ -407,8 +405,7 @@ def EMKF(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihood=0.01, tol
                 else:
                     Q_i = (A_3 - A_1 @ np.linalg.inv(A_2) @ A_1.T) / T
                 if is_pos_def(Q_i) == False:
-                    print(f"Q_{i} NON-SPD")
-                Q_i = force_SPD(Q_i)
+                    Q_i = force_SPD(Q_i)
 
                 Q = np.append(Q, [Q_i], 0)
 

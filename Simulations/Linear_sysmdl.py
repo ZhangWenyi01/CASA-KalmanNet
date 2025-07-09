@@ -388,6 +388,7 @@ class SystemModel:
                     mean = torch.zeros([size, self.m])
                     # Use appropriate Q based on change point
                     if t >= change_index and self.param_to_change == 'Q':
+                        # Sharp change
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q_afterCPD)
                         # # Graduately
                         # distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q*(1.4**(t-change_index)))

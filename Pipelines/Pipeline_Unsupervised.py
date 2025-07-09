@@ -65,6 +65,10 @@ class Pipeline_Unsupervised:
         self.N_T = len(y_observation)  # Number of trajectories
         self.stride = 5
         
+        # Initialize computation time tracking for each trajectory
+        self.original_compute_times = torch.zeros(self.N_T)
+        self.cpd_unsupervised_compute_times = torch.zeros(self.N_T)
+        self.only_unsupervised_compute_times = torch.zeros(self.N_T)
 
         ###############################
         ### Training Sequence Batch ###
@@ -108,6 +112,11 @@ class Pipeline_Unsupervised:
         # Start looping over trajectories
         for trajectorie in range(self.N_T):
             print('Trajectory: ', trajectorie + 1, '/', self.N_T)
+
+            # Initialize time counters for this trajectory
+            trajectory_original_time = 0.0
+            trajectory_cpd_unsupervised_time = 0.0
+            trajectory_only_unsupervised_time = 0.0
 
             ###############################
             ### Training Sequence Batch ###
@@ -158,12 +167,23 @@ class Pipeline_Unsupervised:
 
                 # Start training
                 for i in range(self.stride):
+                    # CPDUnsupervised algorithm computation time
+                    start_time = time.time()
                     x_out_online[:, :, i] = torch.squeeze(self.KNetmodel(torch.unsqueeze(observation[:, :, i],dim=2)))
                     y_out_online[:, :, i] = torch.squeeze(self.KNetmodel.m1y)
+                    trajectory_cpd_unsupervised_time += time.time() - start_time
+                    
+                    # Original algorithm computation time
+                    start_time = time.time()
                     x_out_original[:, :, i] = torch.squeeze(original_model(torch.unsqueeze(observation[:, :, i],dim=2)))
                     y_out_original[:, :, i] = torch.squeeze(original_model.m1y)
+                    trajectory_original_time += time.time() - start_time
+                    
+                    # Only Unsupervised algorithm computation time
+                    start_time = time.time()
                     x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(torch.unsqueeze(observation[:, :, i],dim=2)))
                     y_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model.m1y)
+                    trajectory_only_unsupervised_time += time.time() - start_time
 
                 self.observation_predictions[trajectorie, :,
                 (stride * self.stride):(stride * self.stride + self.stride)] = y_out_online.detach()
@@ -187,26 +207,27 @@ class Pipeline_Unsupervised:
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = new_lr
 
-
-                LOSS = self.loss_fn(y_out_online,observation)
-                self.optimizer.zero_grad()
-                LOSS.backward()
-                self.optimizer.step()
+                    if cpd_out_tmp > 0.65:
+                        LOSS = self.loss_fn(y_out_online,observation)
+                        self.optimizer.zero_grad()
+                        LOSS.backward()
+                        self.optimizer.step()
+                        
+                        del LOSS
                 
                 LOSS_unsupervised = self.loss_fn(y_out_unsupervised,observation)
                 self.optimizer_unsupervised.zero_grad()
                 LOSS_unsupervised.backward()
                 self.optimizer_unsupervised.step()
-                
-                #  Print statistics every 10% of a trajectory
-                # counter += 1
-                # if counter % max(int(number_of_stride/10),1) == 0:
-                #     print('Training itt:', stride + 1, '/', number_of_stride, ',OBS MSE:',
-                #           10 * torch.log10(LOSS).item(), '[dB]')
                     
-                del LOSS,y_out_online,observation,LOSS_unsupervised
+                del y_out_online,observation,LOSS_unsupervised
             # Reset the optimizer for the next trajectory
             self.ResetOptimizer()
+            
+            # Save computation times for this trajectory
+            self.original_compute_times[trajectorie] = trajectory_original_time
+            self.cpd_unsupervised_compute_times[trajectorie] = trajectory_cpd_unsupervised_time
+            self.only_unsupervised_compute_times[trajectorie] = trajectory_only_unsupervised_time
             
             loss_fn = torch.nn.MSELoss(reduction='none')
             MSE_Original_Linear = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
@@ -231,12 +252,33 @@ class Pipeline_Unsupervised:
             self.STD_Unsupervised_dB[trajectorie,:,:] = STD_Unsupervised_dB.mean().item()
             
             
-        print('MSE Original:', self.MSE_Original_dB.mean().item(), '[dB]')
-        print('STD Original:',self.STD_Original_dB.mean().item(),'[dB]')
-        print('MSE CPDUnsupervised:', self.MSE_Ours_dB.mean().item(), '[dB]')
-        print('STD CPDUnsupervised:',self.STD_Ours_dB.mean().item(),'[dB]')
-        print('MSE Unsupervised:', self.MSE_Unsupervised_dB.mean().item(), '[dB]')
-        print('STD Unsupervised:',self.STD_Unsupervised_dB.mean().item(),'[dB]')
+        # Calculate time statistics
+        original_mean_time = self.original_compute_times.mean().item()
+        original_std_time = self.original_compute_times.std().item()
+        cpd_mean_time = self.cpd_unsupervised_compute_times.mean().item()
+        cpd_std_time = self.cpd_unsupervised_compute_times.std().item()
+        unsupervised_mean_time = self.only_unsupervised_compute_times.mean().item()
+        unsupervised_std_time = self.only_unsupervised_compute_times.std().item()
+        
+        # Display comprehensive performance and computation time statistics
+        print('\n' + '='*90)
+        print('                        算法性能与计算时间综合统计结果                        ')
+        print('='*90)
+        print(f'{"算法名称":<20} {"MSE (dB)":<12} {"STD (dB)":<12} {"平均时间 (秒)":<12} {"时间标准差":<12} {"效率评级":<12}')
+        print('-'*90)
+        
+        # 计算效率评级
+        fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
+        original_efficiency = fastest_time/original_mean_time
+        cpd_efficiency = fastest_time/cpd_mean_time
+        unsupervised_efficiency = fastest_time/unsupervised_mean_time
+        
+        print(f'{"原始 KalmanNet":<20} {self.MSE_Original_dB.mean().item():<12.4f} {self.STD_Original_dB.mean().item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
+        print(f'{"CPDNet-无监督":<20} {self.MSE_Ours_dB.mean().item():<12.4f} {self.STD_Ours_dB.mean().item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
+        print(f'{"纯无监督":<20} {self.MSE_Unsupervised_dB.mean().item():<12.4f} {self.STD_Unsupervised_dB.mean().item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
+        print('='*90)
+
+
             
             
             # plt.figure(figsize=(10, 6))

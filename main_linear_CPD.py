@@ -1,9 +1,12 @@
 import torch
 from datetime import datetime
+import numpy as np
 
 from Simulations.Linear_sysmdl import SystemModel
 import Simulations.config as config
 import Simulations.utils as utils
+# MEKF Test
+from estimate_Q_with_EMKF import sliding_window_EMKF
 from Simulations.Linear_CPD.parameters import F_gen,F_CV,H_identity,H_onlyPos,\
    Q_gen,Q_CV,R_3,R_2,R_onlyPos,\
    m,m_cv
@@ -273,3 +276,58 @@ unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,y_ture_test,x_tur
                                  randomInit= True,
                                  changepoint=test_ChangePoint,
                                  changeparameters=change_point_params)
+
+# Run EMKF for all trajectories
+emkf_mse_array = []
+emkf_position_mse_array = []
+emkf_full_state_mse_array = []
+
+for traj_idx in range(args.N_T):
+    
+    current_input = test_input_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 1)
+    current_target = test_target_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 3)
+    current_init = test_init_CPD[traj_idx, :, 0].cpu().numpy()  # Get true initial state
+    
+    # Use more reasonable window parameters
+    sliding_results = sliding_window_EMKF(
+        observations=current_input,
+        true_states=current_target,
+        F_true=F_gen.cpu().numpy(),
+        H_true=H_onlyPos.cpu().numpy(),
+        R_true=R_onlyPos.cpu().numpy(),
+        Q_initial=Q_gen.cpu().numpy(),
+        window_size=50,      # Increase window size
+        overlap=15,          # Reduce overlap
+        verbose=False,
+        true_init_state=current_init,
+        allStates=Loss_On_AllState,  # Ensure consistency with KF test allStates parameter
+        init_covariance=m2x_0.cpu().numpy()  # 🔥 Use the same initial covariance matrix as KF test
+    )
+    
+    if sliding_results['filtered_states'] is not None:
+        emkf_position_mse_array.append(sliding_results['position_mse_db'])
+        emkf_full_state_mse_array.append(sliding_results['full_state_mse_db'])
+        emkf_mse_array.append(sliding_results['mse_loss'])
+    else:
+        emkf_mse_array.append(float('inf'))
+        emkf_position_mse_array.append(float('inf'))
+        emkf_full_state_mse_array.append(float('inf'))
+
+# Calculate EMKF average performance
+if emkf_mse_array:
+    valid_results = [x for x in emkf_mse_array if x != float('inf')]
+    if valid_results:
+        emkf_avg_mse = np.mean(valid_results)
+        emkf_std_mse = np.std(valid_results)
+        
+        position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
+        full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
+        
+        print(f"\n=== EMKF Final Results ===")
+        print(f"Successful trajectories: {len(valid_results)}/{args.N_T}")
+        print(f"Position MSE Loss: {np.mean(position_valid):.6f} ± {np.std(position_valid):.6f} dB")
+        print(f"Full-state MSE Loss: {np.mean(full_state_valid):.6f} ± {np.std(full_state_valid):.6f} dB")
+    else:
+        print(f"❌ All EMKF trajectories failed")
+else:
+    print(f"❌ No EMKF results")
