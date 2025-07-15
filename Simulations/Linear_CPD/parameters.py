@@ -36,8 +36,11 @@ H_onlyPos = torch.tensor([[1, 0, 0]]).float()
 ### process noise Q and observation noise R ###
 ###############################################
 # Noise Parameters
-r2 = torch.tensor([0.05]).float()
-q2 = torch.tensor([2]).float()
+v = 0 # dB
+gamma = -5
+linear_factor = 10 ** (gamma / 10)
+r2 = torch.tensor([1/linear_factor]).float()
+q2 = r2*10 ** (v / 10)
 
 Q_gen = q2 * torch.tensor([[1/20*delta_t_gen**5, 1/8*delta_t_gen**4,1/6*delta_t_gen**3],
                            [ 1/8*delta_t_gen**4, 1/3*delta_t_gen**3,1/2*delta_t_gen**2],

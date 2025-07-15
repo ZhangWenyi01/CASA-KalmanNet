@@ -41,6 +41,7 @@ class Pipeline_Unsupervised:
         self.ssModel = ssModel
         
     def ResetOptimizer(self):
+        # This method is now unused in the optimized version
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
         
     def setTrainingParams(self, args):
@@ -60,7 +61,7 @@ class Pipeline_Unsupervised:
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
         
 
-    def Unsupervised_CPD_Online(self, SysModel,y_observation,x_true,train_init):
+    def Unsupervised_CPD_Online(self, SysModel,y_observation,x_true,train_init, first_dim_only=False):
         
         self.N_T = len(y_observation)  # Number of trajectories
         self.stride = 5
@@ -71,18 +72,28 @@ class Pipeline_Unsupervised:
         self.only_unsupervised_compute_times = torch.zeros(self.N_T)
 
         ###############################
-        ### Training Sequence Batch ###
+        ### Initialize Models and Optimizers ###
         ###############################
-        self.optimizer.zero_grad()
-        # KNet Training Mode
-        self.KNetmodel.train()
+        # Set model modes once at the beginning
+        self.KNetmodel.eval()           # Baseline model - no training
         self.KNetmodel.batch_size = 1
-        # CPDNet Test Mode
-        self.CPDmodel.eval()
+        self.CPDmodel.eval()            # CPD detection model
         self.CPDmodel.batch_size = 1
-        # Init Hidden State
-        self.KNetmodel.init_hidden_KNet()
-        # Allocate estimate array
+        
+        # Create independent model copies with proper configurations
+        original_model = copy.deepcopy(self.KNetmodel)
+        original_model.train()          # CPD-based online learning
+        original_model.batch_size = 1
+        
+        unsupervised_model = copy.deepcopy(self.KNetmodel)
+        unsupervised_model.train()      # Continuous online learning
+        unsupervised_model.batch_size = 1
+        
+        # Initialize optimizers once
+        self.optimizer_original = torch.optim.Adam(original_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
+        self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
+        
+        # Allocate result arrays
         self.observation_predictions = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_predictions = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
         self.observation_original = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
@@ -90,24 +101,16 @@ class Pipeline_Unsupervised:
         self.observation_unsupervised = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_unsupervised = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
         
-        self.MSE_Original_dB = torch.empty((self.N_T, 1, SysModel.T))
-        self.STD_Original_dB = torch.empty((self.N_T, 1, SysModel.T))
-        self.MSE_Unsupervised_dB = torch.empty((self.N_T, 1, SysModel.T))
-        self.STD_Unsupervised_dB = torch.empty((self.N_T, 1, SysModel.T))
-        self.MSE_Ours_dB = torch.empty((self.N_T, 1, SysModel.T))
-        self.STD_Ours_dB = torch.empty((self.N_T, 1, SysModel.T))
-
-        # Copy to restore the NN to its original state for each trajectory
-        original_model = copy.deepcopy(self.KNetmodel)
-        original_model.eval()
-        original_model.batch_size = 1
-        original_model.init_hidden_KNet()
-        
-        unsupervised_model = copy.deepcopy(self.KNetmodel)
-        unsupervised_model.train()
-        unsupervised_model.batch_size = 1
-        unsupervised_model.init_hidden_KNet()
-        self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
+        # Modify MSE storage arrays to support dimension-wise MSE when first_dim_only=True
+        if first_dim_only:
+            # Store MSE for position, velocity, acceleration separately
+            self.MSE_Original_linear_arr = torch.empty((self.N_T, 3))  # 3 dimensions: pos, vel, acc
+            self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T, 3))
+            self.MSE_Ours_linear_arr = torch.empty((self.N_T, 3))
+        else:
+            self.MSE_Original_linear_arr = torch.empty((self.N_T,))
+            self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T,))
+            self.MSE_Ours_linear_arr = torch.empty((self.N_T,))
         
         # Start looping over trajectories
         for trajectorie in range(self.N_T):
@@ -118,70 +121,64 @@ class Pipeline_Unsupervised:
             trajectory_cpd_unsupervised_time = 0.0
             trajectory_only_unsupervised_time = 0.0
 
-            ###############################
-            ### Training Sequence Batch ###
-            ###############################
-            self.reTraining = False
-            # Reset optimizer
-            self.ResetOptimizer()
-            # Training Mode
-            self.KNetmodel.train()
-
             # Load the next trajectory
             y_training = torch.unsqueeze(y_observation[trajectorie, :, :],0).requires_grad_(True).to(self.device)
-
-            # Initialize state
-            self.KNetmodel.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
-            original_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
-            unsupervised_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
+            
+            # Initialize all models with the trajectory's initial state
+            init_state = torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device)
+            self.KNetmodel.InitSequence(init_state, self.args.T)
+            original_model.InitSequence(init_state, self.args.T)
+            unsupervised_model.InitSequence(init_state, self.args.T)
+            
+            # Initialize hidden states
+            self.KNetmodel.init_hidden_KNet()
+            original_model.init_hidden_KNet()
+            unsupervised_model.init_hidden_KNet()
+            
             # Calculate the number of strides required
             number_of_stride = int(self.ssModel.T / self.stride)
-            
             cpd_input = torch.zeros(1, 1, SysModel.T).to(self.device)
-            counter = 0
             
 
             # Go through the whole trajectory step by step
             for stride in trange(number_of_stride):
                 observation = y_training[:, :, (stride * self.stride):(stride * self.stride + self.stride)].to(self.device)
                 
+                # Allocate output tensors for this stride
                 x_out_online = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_online = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
-                
                 x_out_original = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_original = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
-                
                 x_out_unsupervised = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_unsupervised = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
-                # Initialize training mode
-                self.KNetmodel.train()
-                original_model.eval()
-                unsupervised_model.train()
-                # Initialize the informations
-                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.clone().detach(),SysModel.T)
-                original_model.InitSequence(original_model.m1x_posterior.clone().detach(),SysModel.T)
-                unsupervised_model.InitSequence(unsupervised_model.m1x_posterior.clone().detach(),SysModel.T)
+                
+                # Update model states for this stride (no mode changes needed)
+                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.clone().detach(), SysModel.T)
+                original_model.InitSequence(original_model.m1x_posterior.clone().detach(), SysModel.T)
+                unsupervised_model.InitSequence(unsupervised_model.m1x_posterior.clone().detach(), SysModel.T)
                 self.KNetmodel.init_hidden_KNet()
                 original_model.init_hidden_KNet()
                 unsupervised_model.init_hidden_KNet()
 
-                # Start training
+                # Process each observation in the current stride
                 for i in range(self.stride):
-                    # CPDUnsupervised algorithm computation time
+                    obs_i = torch.unsqueeze(observation[:, :, i], dim=2)
+                    
+                    # KNet baseline (no training)
                     start_time = time.time()
-                    x_out_online[:, :, i] = torch.squeeze(self.KNetmodel(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_online[:, :, i] = torch.squeeze(self.KNetmodel(obs_i))
                     y_out_online[:, :, i] = torch.squeeze(self.KNetmodel.m1y)
                     trajectory_cpd_unsupervised_time += time.time() - start_time
                     
-                    # Original algorithm computation time
+                    # Original model (CPD-based online learning)
                     start_time = time.time()
-                    x_out_original[:, :, i] = torch.squeeze(original_model(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_original[:, :, i] = torch.squeeze(original_model(obs_i))
                     y_out_original[:, :, i] = torch.squeeze(original_model.m1y)
                     trajectory_original_time += time.time() - start_time
                     
-                    # Only Unsupervised algorithm computation time
+                    # Unsupervised model (continuous online learning)
                     start_time = time.time()
-                    x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(obs_i))
                     y_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model.m1y)
                     trajectory_only_unsupervised_time += time.time() - start_time
 
@@ -204,52 +201,82 @@ class Pipeline_Unsupervised:
                                                                     y_training[:, :, (stride * self.stride-self.stride+t):(stride * self.stride+t)])
                     cpd_out_tmp = self.CPDmodel(cpd_input[:, :, (stride-1)*self.stride:(stride-1)*self.stride+self.stride])
                     new_lr = (20*cpd_out_tmp*self.learningRate).item()
-                    for param_group in self.optimizer.param_groups:
+                    for param_group in self.optimizer_original.param_groups:
                         param_group['lr'] = new_lr
 
-                    if cpd_out_tmp > 0.65:
-                        LOSS = self.loss_fn(y_out_online,observation)
-                        self.optimizer.zero_grad()
-                        LOSS.backward()
-                        self.optimizer.step()
+                    if cpd_out_tmp > 0.8:
+                        LOSS_original = self.loss_fn(y_out_original,observation)
+                        self.optimizer_original.zero_grad()
+                        LOSS_original.backward()
+                        self.optimizer_original.step()
                         
-                        del LOSS
+                        del LOSS_original
                 
                 LOSS_unsupervised = self.loss_fn(y_out_unsupervised,observation)
                 self.optimizer_unsupervised.zero_grad()
                 LOSS_unsupervised.backward()
                 self.optimizer_unsupervised.step()
                     
-                del y_out_online,observation,LOSS_unsupervised
+                del observation,LOSS_unsupervised
             # Reset the optimizer for the next trajectory
-            self.ResetOptimizer()
+            # self.ResetOptimizer()
+            # self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
+            # self.optimizer_original = torch.optim.Adam(original_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
             
             # Save computation times for this trajectory
             self.original_compute_times[trajectorie] = trajectory_original_time
             self.cpd_unsupervised_compute_times[trajectorie] = trajectory_cpd_unsupervised_time
             self.only_unsupervised_compute_times[trajectorie] = trajectory_only_unsupervised_time
             
-            loss_fn = torch.nn.MSELoss(reduction='none')
-            MSE_Original_Linear = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_Original_dB = 10 * torch.log10(MSE_Original_Linear)
-            STD_Original = torch.std(MSE_Original_dB, unbiased=True)
-            STD_Original_dB = 10*torch.log10(STD_Original)
-            self.MSE_Original_dB[trajectorie,:,:] = MSE_Original_dB.mean().item()
-            self.STD_Original_dB[trajectorie,:,:] = STD_Original_dB.mean().item()
+            loss_fn = torch.nn.MSELoss(reduction='mean')  # Fix: Use consistent calculation method as KF
             
-            MSE_CPDUnsupervised_Linear = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_CPDUnsupervised_dB = 10 * torch.log10(MSE_CPDUnsupervised_Linear)
-            STD_CPDUnsupervised = torch.std(MSE_CPDUnsupervised_dB, unbiased=True)
-            STD_CPDUnsupervised_dB = 10*torch.log10(STD_CPDUnsupervised)
-            self.MSE_Ours_dB[trajectorie,:,:] = MSE_CPDUnsupervised_dB.mean().item()
-            self.STD_Ours_dB[trajectorie,:,:] = STD_CPDUnsupervised_dB.mean().item()
+            # Calculate MSE for Original model
+            if first_dim_only:
+                # Calculate MSE for each dimension separately: position, velocity, acceleration
+                # Position (dimension 0)
+                self.MSE_Original_linear_arr[trajectorie,0] = loss_fn(self.state_original[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+                
+                # Velocity (dimension 1) if available
+                if self.ssModel.m > 1:
+                    self.MSE_Original_linear_arr[trajectorie,1] = loss_fn(self.state_original[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+                
+                # Acceleration (dimension 2) if available
+                if self.ssModel.m > 2:
+                    self.MSE_Original_linear_arr[trajectorie,2] = loss_fn(self.state_original[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
+            else:
+                self.MSE_Original_linear_arr[trajectorie] = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
             
-            MSE_Unsupervised_Linear = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_Unsupervised_dB = 10 * torch.log10(MSE_Unsupervised_Linear)
-            STD_Unsupervised = torch.std(MSE_Unsupervised_dB, unbiased=True)
-            STD_Unsupervised_dB = 10*torch.log10(STD_Unsupervised)
-            self.MSE_Unsupervised_dB[trajectorie,:,:] = MSE_Unsupervised_dB.mean().item()
-            self.STD_Unsupervised_dB[trajectorie,:,:] = STD_Unsupervised_dB.mean().item()
+            # Calculate MSE for CPD-Unsupervised model
+            if first_dim_only:
+                # Calculate MSE for each dimension separately: position, velocity, acceleration
+                # Position (dimension 0)
+                self.MSE_Ours_linear_arr[trajectorie,0] = loss_fn(self.state_predictions[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+                
+                # Velocity (dimension 1) if available
+                if self.ssModel.m > 1:
+                    self.MSE_Ours_linear_arr[trajectorie,1] = loss_fn(self.state_predictions[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+                
+                # Acceleration (dimension 2) if available
+                if self.ssModel.m > 2:
+                    self.MSE_Ours_linear_arr[trajectorie,2] = loss_fn(self.state_predictions[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
+            else:
+                self.MSE_Ours_linear_arr[trajectorie] = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            
+            # Calculate MSE for Pure Unsupervised model
+            if first_dim_only:
+                # Calculate MSE for each dimension separately: position, velocity, acceleration
+                # Position (dimension 0)
+                self.MSE_Unsupervised_linear_arr[trajectorie,0] = loss_fn(self.state_unsupervised[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+                
+                # Velocity (dimension 1) if available
+                if self.ssModel.m > 1:
+                    self.MSE_Unsupervised_linear_arr[trajectorie,1] = loss_fn(self.state_unsupervised[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+                
+                # Acceleration (dimension 2) if available
+                if self.ssModel.m > 2:
+                    self.MSE_Unsupervised_linear_arr[trajectorie,2] = loss_fn(self.state_unsupervised[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
+            else:
+                self.MSE_Unsupervised_linear_arr[trajectorie] = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
             
             
         # Calculate time statistics
@@ -260,22 +287,96 @@ class Pipeline_Unsupervised:
         unsupervised_mean_time = self.only_unsupervised_compute_times.mean().item()
         unsupervised_std_time = self.only_unsupervised_compute_times.std().item()
         
+        # Calculate averages and dB values (following KalmanFilter_test.py logic)
+        if first_dim_only:
+            # Calculate averages and standard deviations for each dimension
+            MSE_Original_linear_avg = torch.mean(self.MSE_Original_linear_arr, dim=0)  # Average over trajectories for each dimension
+            MSE_Original_dB_avg = 10 * torch.log10(MSE_Original_linear_avg)
+            MSE_Original_linear_std = torch.std(self.MSE_Original_linear_arr, dim=0, unbiased=True)
+            Original_std_dB = 10 * torch.log10(MSE_Original_linear_std + MSE_Original_linear_avg) - MSE_Original_dB_avg
+            
+            MSE_Ours_linear_avg = torch.mean(self.MSE_Ours_linear_arr, dim=0)
+            MSE_Ours_dB_avg = 10 * torch.log10(MSE_Ours_linear_avg)
+            MSE_Ours_linear_std = torch.std(self.MSE_Ours_linear_arr, dim=0, unbiased=True)
+            Ours_std_dB = 10 * torch.log10(MSE_Ours_linear_std + MSE_Ours_linear_avg) - MSE_Ours_dB_avg
+            
+            MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr, dim=0)
+            MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
+            MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, dim=0, unbiased=True)
+            Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
+        else:
+            MSE_Original_linear_avg = torch.mean(self.MSE_Original_linear_arr)
+            MSE_Original_dB_avg = 10 * torch.log10(MSE_Original_linear_avg)
+            MSE_Original_linear_std = torch.std(self.MSE_Original_linear_arr, unbiased=True)
+            Original_std_dB = 10 * torch.log10(MSE_Original_linear_std + MSE_Original_linear_avg) - MSE_Original_dB_avg
+            
+            MSE_Ours_linear_avg = torch.mean(self.MSE_Ours_linear_arr)
+            MSE_Ours_dB_avg = 10 * torch.log10(MSE_Ours_linear_avg)
+            MSE_Ours_linear_std = torch.std(self.MSE_Ours_linear_arr, unbiased=True)
+            Ours_std_dB = 10 * torch.log10(MSE_Ours_linear_std + MSE_Ours_linear_avg) - MSE_Ours_dB_avg
+            
+            MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr)
+            MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
+            MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, unbiased=True)
+            Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
+        
         # Display comprehensive performance and computation time statistics
         print('\n' + '='*90)
-        print('                        算法性能与计算时间综合统计结果                        ')
+        if first_dim_only:
+            print('     Algorithm Performance by Dimension (Position, Velocity, Acceleration) and Computation Time     ')
+        else:
+            print('                    Algorithm Performance and Computation Time Statistics                    ')
         print('='*90)
-        print(f'{"算法名称":<20} {"MSE (dB)":<12} {"STD (dB)":<12} {"平均时间 (秒)":<12} {"时间标准差":<12} {"效率评级":<12}')
-        print('-'*90)
         
-        # 计算效率评级
-        fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
-        original_efficiency = fastest_time/original_mean_time
-        cpd_efficiency = fastest_time/cpd_mean_time
-        unsupervised_efficiency = fastest_time/unsupervised_mean_time
+        if first_dim_only:
+            # Display results for each dimension separately
+            print(f'{"Algorithm Name":<20} {"Dimension":<12} {"MSE (dB)":<12} {"STD (dB)":<12} {"Avg Time (s)":<12} {"Time Std":<12} {"Efficiency":<12}')
+            print('-'*90)
+            
+            # Calculate efficiency rating
+            fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
+            original_efficiency = fastest_time/original_mean_time
+            cpd_efficiency = fastest_time/cpd_mean_time
+            unsupervised_efficiency = fastest_time/unsupervised_mean_time
+            
+            # Original KalmanNet results
+            dimensions = ['Position', 'Velocity', 'Acceleration']
+            for dim_idx in range(min(3, self.ssModel.m)):  # Only show available dimensions
+                dim_name = dimensions[dim_idx]
+                if dim_idx == 0:  # Show timing info only for first dimension
+                    print(f'{"Original KalmanNet":<20} {dim_name:<12} {MSE_Original_dB_avg[dim_idx].item():<12.4f} {Original_std_dB[dim_idx].item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
+                else:
+                    print(f'{"":<20} {dim_name:<12} {MSE_Original_dB_avg[dim_idx].item():<12.4f} {Original_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
+            
+            # CPDNet-Unsupervised results
+            for dim_idx in range(min(3, self.ssModel.m)):
+                dim_name = dimensions[dim_idx]
+                if dim_idx == 0:  # Show timing info only for first dimension
+                    print(f'{"CPDNet-Unsupervised":<20} {dim_name:<12} {MSE_Ours_dB_avg[dim_idx].item():<12.4f} {Ours_std_dB[dim_idx].item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
+                else:
+                    print(f'{"":<20} {dim_name:<12} {MSE_Ours_dB_avg[dim_idx].item():<12.4f} {Ours_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
+            
+            # Pure Unsupervised results
+            for dim_idx in range(min(3, self.ssModel.m)):
+                dim_name = dimensions[dim_idx]
+                if dim_idx == 0:  # Show timing info only for first dimension
+                    print(f'{"Pure Unsupervised":<20} {dim_name:<12} {MSE_Unsupervised_dB_avg[dim_idx].item():<12.4f} {Unsupervised_std_dB[dim_idx].item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
+                else:
+                    print(f'{"":<20} {dim_name:<12} {MSE_Unsupervised_dB_avg[dim_idx].item():<12.4f} {Unsupervised_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
+        else:
+            print(f'{"Algorithm Name":<20} {"MSE (dB)":<12} {"STD (dB)":<12} {"Avg Time (s)":<12} {"Time Std":<12} {"Efficiency":<12}')
+            print('-'*90)
+            
+            # Calculate efficiency rating
+            fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
+            original_efficiency = fastest_time/original_mean_time
+            cpd_efficiency = fastest_time/cpd_mean_time
+            unsupervised_efficiency = fastest_time/unsupervised_mean_time
+            
+            print(f'{"Original KalmanNet":<20} {MSE_Original_dB_avg.item():<12.4f} {Original_std_dB.item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
+            print(f'{"CPDNet-Unsupervised":<20} {MSE_Ours_dB_avg.item():<12.4f} {Ours_std_dB.item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
+            print(f'{"Pure Unsupervised":<20} {MSE_Unsupervised_dB_avg.item():<12.4f} {Unsupervised_std_dB.item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
         
-        print(f'{"原始 KalmanNet":<20} {self.MSE_Original_dB.mean().item():<12.4f} {self.STD_Original_dB.mean().item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
-        print(f'{"CPDNet-无监督":<20} {self.MSE_Ours_dB.mean().item():<12.4f} {self.STD_Ours_dB.mean().item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
-        print(f'{"纯无监督":<20} {self.MSE_Unsupervised_dB.mean().item():<12.4f} {self.STD_Unsupervised_dB.mean().item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
         print('='*90)
 
 
@@ -433,16 +534,16 @@ class Pipeline_Unsupervised:
             self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
         
             
-            loss_fn = torch.nn.MSELoss(reduction='none')
+            loss_fn = torch.nn.MSELoss(reduction='mean')
             MSE_Original_Linear = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
             MSE_Original_dB = 10 * torch.log10(MSE_Original_Linear)
             MSE_CPDUnsupervised_Linear = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
             MSE_CPDUnsupervised_dB = 10 * torch.log10(MSE_CPDUnsupervised_Linear)
             MSE_Unsupervised_Linear = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
             MSE_Unsupervised_dB = 10 * torch.log10(MSE_Unsupervised_Linear)
-            print('MSE Original:', MSE_Original_dB.mean().item(), '[dB]')
-            print('MSE CPDUnsupervised:', MSE_CPDUnsupervised_dB.mean().item(), '[dB]')
-            print('MSE Unsupervised:', MSE_Unsupervised_dB.mean().item(), '[dB]')
+            print('MSE Original:', MSE_Original_dB.item(), '[dB]')
+            print('MSE CPDUnsupervised:', MSE_CPDUnsupervised_dB.item(), '[dB]')
+            print('MSE Unsupervised:', MSE_Unsupervised_dB.item(), '[dB]')
             # Create tensorboard writer
             
             

@@ -545,6 +545,9 @@ def estimate_Q_from_observations(observations, F_true=None, H_true=None, R_true=
     
     
     # Call EMKF function
+    # results = EMKF_FilterOnly(F_true, Q_initial, H_true, R_true, observations, 
+    #                xi_true, L_true, max_it=max_iterations, 
+    #                em_vars=estimate_params)
     results = EMKF(F_true, Q_initial, H_true, R_true, observations, 
                    xi_true, L_true, max_it=max_iterations, 
                    em_vars=estimate_params)
@@ -952,7 +955,7 @@ def plot_adaptive_results(observations, true_states, adaptive_results, true_para
 def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true, 
                         window_size=50, overlap=20, Q_initial=None, 
                         max_iterations=50, verbose=False, true_init_state=None,
-                        allStates=True, init_covariance=None):
+                        allStates=True, init_covariance=None, first_dim_only=False):
     """
     Sliding Window EMKF for adaptive Q matrix estimation
     
@@ -970,6 +973,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     true_init_state: true initial state, if None uses first true state
     allStates: if True, compute MSE on all states; if False, only position (same as KF test)
     init_covariance: initial covariance matrix (n, n), if None uses identity
+    first_dim_only: if True, compute MSE for position, velocity, acceleration separately
     
     Returns:
     dict containing:
@@ -977,6 +981,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     - 'final_Q': Final estimated Q matrix
     - 'filtered_states': All filtered states using adaptive Q
     - 'Q_history': History of Q estimates per window
+    - 'detailed_mse': Detailed MSE information (if first_dim_only=True)
     """
     
     # Convert inputs to numpy if they're tensors
@@ -1020,30 +1025,26 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     else:
         xi_true = true_states[0]  # Use first true state as initial
     
-    # 🔥 使用与KF测试相同的初始协方差矩阵
+    # Use same initial covariance matrix as KF test
     if init_covariance is not None:
         if hasattr(init_covariance, 'cpu'):
             L_true = init_covariance.cpu().numpy()
         else:
             L_true = init_covariance.copy()
         
-        # 处理零协方差矩阵的情况
+        # Handle zero covariance matrix case
         if np.allclose(L_true, 0):
             if verbose:
-                print("⚠️  检测到零初始协方差矩阵，添加小的正则化项")
-            L_true = np.eye(n) * 1e-6  # 添加小的正则化项避免数值问题
+                print("Warning: Zero initial covariance detected, adding regularization")
+            L_true = np.eye(n) * 1e-6  # Add regularization for numerical stability
     else:
-        L_true = np.eye(n) * 1.0  # 默认初始协方差
+        L_true = np.eye(n) * 1.0  # Default initial covariance
     
     if verbose:
         print(f"=== Sliding Window EMKF ===")
-        print(f"Observation sequence length: {T}")
-        print(f"State dimension: {n}, Observation dimension: {p}")
+        print(f"Sequence length: {T}, State dim: {n}, Obs dim: {p}")
         print(f"Window size: {window_size}, Overlap: {overlap}")
-        print(f"Initial state: {xi_true}")
-        print(f"Initial covariance matrix:\n{L_true}")
-        print(f"R matrix shape: {R_true.shape}")
-        print(f"AllStates: {allStates}")
+        print(f"AllStates: {allStates}, First Dim Only: {first_dim_only}")
     
     # Use larger, less frequent windows for stability
     effective_window_size = max(window_size, min(50, T//2))
@@ -1056,8 +1057,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         window_starts.append(max(0, T - effective_window_size))  # Ensure coverage to the end
     
     if verbose:
-        print(f"Adjusted window size: {effective_window_size}, overlap: {effective_overlap}")
-        print(f"Total number of windows: {len(window_starts)}")
+        print(f"Processing {len(window_starts)} windows (size: {effective_window_size}, overlap: {effective_overlap})")
     
     # Store results
     Q_history = []
@@ -1066,9 +1066,6 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     for i, start_idx in enumerate(window_starts):
         end_idx = min(start_idx + effective_window_size, T)
         window_obs = observations[start_idx:end_idx]
-        
-        if verbose:
-            print(f"Window {i+1}/{len(window_starts)}: time steps {start_idx}-{end_idx-1}")
         
         # Use current Q estimate for EMKF
         try:
@@ -1086,25 +1083,24 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
             
             # Update Q matrix with conservative smoothing
             new_Q = results['Q_estimated']
-            alpha = 0.3  # More conservative learning rate
+            alpha = 0.3  # Conservative learning rate
             current_Q = alpha * new_Q + (1 - alpha) * current_Q
             
             Q_history.append(current_Q.copy())
             
             if verbose:
-                print(f"Window {i+1} Q matrix diagonal: {np.diag(current_Q)}")
+                print(f"Window {i+1}/{len(window_starts)} processed")
             
         except Exception as e:
             if verbose:
-                print(f"Window {i+1} estimation failed: {e}")
+                print(f"Window {i+1} failed: {e}")
             Q_history.append(current_Q.copy())
     
     # Use final Q matrix to filter the entire sequence
     final_Q = Q_history[-1] if Q_history else Q_initial
     
     if verbose:
-        print(f"Final filtering with adaptive Q matrix...")
-        print(f"Final Q matrix:\n{final_Q}")
+        print(f"Final filtering with adaptive Q matrix")
     
     try:
         # Apply Kalman filter with final Q estimate
@@ -1117,38 +1113,74 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         # Use smoothed estimates (x_tilde[1:] to align with true_states)
         filtered_states = x_tilde[1:]  # Remove initial state
         
-        # **修复MSE计算，确保与KF测试完全一致**
-        if allStates:
-            # 计算所有状态的MSE (与KF测试的allStates=True一致)
+        # Calculate MSE based on first_dim_only parameter
+        if first_dim_only:
+            # Calculate MSE for each dimension separately
+            position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
+            position_mse_db = 10 * np.log10(position_mse_linear)
+            
+            velocity_mse_linear = np.mean((filtered_states[:, 1] - true_states[:, 1]) ** 2) if n > 1 else None
+            velocity_mse_db = 10 * np.log10(velocity_mse_linear) if velocity_mse_linear is not None else None
+            
+            acceleration_mse_linear = np.mean((filtered_states[:, 2] - true_states[:, 2]) ** 2) if n > 2 else None
+            acceleration_mse_db = 10 * np.log10(acceleration_mse_linear) if acceleration_mse_linear is not None else None
+            
+            # For compatibility, still return the main mse_loss
+            if allStates:
+                full_state_mse_linear = np.mean((filtered_states - true_states) ** 2)
+                mse_loss = 10 * np.log10(full_state_mse_linear)
+            else:
+                mse_loss = position_mse_db
+                
+        elif allStates:
+            # Calculate MSE for all states (consistent with KF test allStates=True)
             mse_linear = np.mean((filtered_states - true_states) ** 2)
             mse_loss = 10 * np.log10(mse_linear)
         else:
-            # 只计算位置的MSE (与KF测试的allStates=False一致)
-            # 使用与KF测试相同的mask: loc = [True, False, False]
+            # Calculate MSE for position only (consistent with KF test allStates=False)
             position_mse = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
             mse_loss = 10 * np.log10(position_mse)
         
-        # 为了兼容性，同时计算分别的MSE
+        # Calculate separate MSEs for compatibility
         position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
         position_mse_db = 10 * np.log10(position_mse_linear)
         
         full_state_mse_linear = np.mean((filtered_states - true_states) ** 2)
         full_state_mse_db = 10 * np.log10(full_state_mse_linear)
         
+        # Detailed MSE information for first_dim_only mode
+        detailed_mse_results = None
+        if first_dim_only:
+            detailed_mse_results = {
+                'MSE_position_dB': position_mse_db,
+                'MSE_velocity_dB': velocity_mse_db if n > 1 else None,
+                'MSE_acceleration_dB': acceleration_mse_db if n > 2 else None,
+                'mse_position_linear': position_mse_linear,
+                'mse_velocity_linear': velocity_mse_linear if n > 1 else None,
+                'mse_acceleration_linear': acceleration_mse_linear if n > 2 else None
+            }
+        
         if verbose:
-            print(f"Position-only MSE: {position_mse_db:.4f} dB")
-            print(f"Full-state MSE: {full_state_mse_db:.4f} dB")
-            print(f"Computed MSE ({'全状态' if allStates else '位置'}): {mse_loss:.4f} dB")
+            if first_dim_only:
+                print("EMKF MSE by Dimension:")
+                print(f"  Position: {position_mse_db:.4f} dB")
+                if n > 1:
+                    print(f"  Velocity: {velocity_mse_db:.4f} dB")
+                if n > 2:
+                    print(f"  Acceleration: {acceleration_mse_db:.4f} dB")
+            else:
+                print(f"MSE ({'all states' if allStates else 'position only'}): {mse_loss:.4f} dB")
         
         return {
-            'mse_loss': mse_loss,  # 主MSE，根据allStates参数计算
-            'position_mse_db': position_mse_db,  # 位置MSE
-            'full_state_mse_db': full_state_mse_db,  # 全状态MSE
+            'mse_loss': mse_loss,  # Main MSE based on allStates parameter
+            'position_mse_db': position_mse_db,  # Position-only MSE
+            'full_state_mse_db': full_state_mse_db,  # Full-state MSE
             'final_Q': final_Q,
             'filtered_states': filtered_states,
             'Q_history': Q_history,
             'true_states': true_states,
-            'observations': observations
+            'observations': observations,
+            'detailed_mse': detailed_mse_results  # New detailed MSE information for first_dim_only
         }
         
     except Exception as e:
@@ -1164,8 +1196,363 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
             'filtered_states': None,
             'Q_history': Q_history,
             'true_states': true_states,
-            'observations': observations
+            'observations': observations,
+            'detailed_mse': None
         }
+
+def Lag1AutoCov_FilterOnly(K, F, H, P):
+    """
+    简化的滞后协方差计算，仅使用滤波器输出
+    这是一个近似方法，精度会降低，但不需要平滑器
+    """
+    T = len(P) - 1
+    if isinstance(F, np.ndarray):
+        n = F.shape[0]
+    else:
+        n = 1
+
+    # 使用滤波器输出的简化近似
+    if n > 1:
+        V = np.zeros((T, n, n))
+        for i in range(T):
+            # 简化的滞后协方差近似
+            # 基于滤波器的预测误差协方差
+            V[i] = (np.eye(n) - K[i] @ H) @ F @ P[i] @ F.T * 0.5
+    else:
+        V = np.zeros(T)
+        for i in range(T):
+            V[i] = (1 - K[i] * H) * F * P[i] * F * 0.5
+    
+    return V
+
+def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihood=0.01, tol_params=0.005, em_vars=["F", "Q", "H", "R", "xi", "L"]):
+    """
+    仅使用滤波器的EM算法版本（不使用平滑器）
+    注意：这会降低估计精度，但计算更快
+    """
+    T = len(z)
+    if isinstance(xi_0, np.ndarray):
+        n = len(xi_0)
+    else:
+        n = 1
+    if isinstance(z[0], np.ndarray):
+        p = len(z[0])
+    else:
+        p = 1
+
+    # Initialize
+    F = np.array([F_0])
+    Q = np.array([Q_0])
+    H = np.array([H_0])
+    R = np.array([R_0])
+    xi = np.array([xi_0])
+    L = np.array([L_0])
+
+    likelihood = np.empty(1)
+
+    # Multi-dimensional case
+    if n > 1 and p > 1:
+        A_5 = np.zeros((p, p))
+        for j in range(T):
+            A_5 += np.outer(z[j], z[j])
+
+        for i in range(max_it):
+            # E-step (仅使用滤波器)
+            x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
+            
+            # 用滤波器输出替代平滑器输出
+            x_tilde = x_hat[1:]  # 去掉初始状态
+            P_tilde = P[1:]      # 去掉初始协方差
+            
+            # 使用简化的滞后协方差计算
+            V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
+
+            likelihood = np.append(likelihood, [ell(H[i], R[i], z, x_hat_minus, P_minus)], axis=0)
+
+            # Convergence check
+            convergence_count = 0
+            if i >= 1 and likelihood[i + 1] - likelihood[i] < tol_likelihood:
+                convergence_count += 1
+
+            # M-step (与原版相同)
+            A_1 = np.zeros((n, n))
+            A_2 = np.zeros((n, n))
+            A_3 = np.zeros((n, n))
+            A_4 = np.zeros((p, n))
+
+            for j in range(T):
+                if j == 0:
+                    A_1 += np.outer(x_tilde[j], xi[i].flatten()) + V[j] 
+                    A_2 += np.outer(xi[i].flatten(), xi[i].flatten()) + L[i]
+                else:
+                    A_1 += np.outer(x_tilde[j], x_tilde[j-1]) + V[j]
+                    A_2 += np.outer(x_tilde[j-1], x_tilde[j-1]) + P_tilde[j-1]
+                A_3 += np.outer(x_tilde[j], x_tilde[j]) + P_tilde[j]
+                A_4 += np.outer(z[j], x_tilde[j])
+
+            # 参数更新（与原版相同）
+            if "F" in em_vars:
+                F = np.append(F, [A_1 @ np.linalg.inv(A_2)], 0)
+                if i >= 1 and np.all(np.abs(F[i + 1] - F[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                F = np.append(F, [F_0], 0)
+
+            if "Q" in em_vars:
+                if "F" in em_vars:
+                    Q_i = (A_3 - F[i + 1] @ A_1.T) / T
+                else:
+                    Q_i = (A_3 - A_1 @ np.linalg.inv(A_2) @ A_1.T) / T
+
+                if not is_pos_def(Q_i):
+                    Q_i = force_SPD(Q_i)
+
+                Q = np.append(Q, [Q_i], 0)
+
+                if i >= 1 and np.all(np.abs(Q[i + 1] - Q[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                Q = np.append(Q, [Q_0], 0)
+
+            if "H" in em_vars:
+                H = np.append(H, [A_4 @ np.linalg.inv(A_3)], 0)
+                if i >= 1 and np.all(np.abs(H[i + 1] - H[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                H = np.append(H, [H_0], 0)
+
+            if "R" in em_vars:
+                if "H" in em_vars:
+                    R_i = (A_5 - H[i + 1] @ A_4.T) / T
+                else:
+                    R_i = (A_5 - A_4 @ np.linalg.inv(A_3) @ A_4.T) / T
+                
+                R_i = force_SPD(R_i)
+
+                R = np.append(R, [R_i], axis=0)
+                if i >= 1 and np.all(np.abs(R[i + 1] - R[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                R = np.append(R, [R_0], 0)
+
+            if "xi" in em_vars:
+                xi = np.append(xi, [x_tilde[0]], axis=0)
+                if i >= 1 and np.all(np.abs(xi[i + 1] - xi[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                xi = np.append(xi, [xi_0], 0)
+
+            if "L" in em_vars:
+                L = np.append(L, [P_tilde[0]], axis=0)
+                if i >= 1 and np.all(np.abs(L[i + 1] - L[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                L = np.append(L, [L_0], axis=0)
+
+            if convergence_count == len(em_vars) + 1:
+                break
+
+        iterations = i + 1
+
+    # One-dimensional measurements case
+    elif n > 1 and p == 1:
+        A_5 = 0
+        for j in range(T):
+            A_5 += z[j] ** 2
+
+        for i in range(max_it):
+            # E-step (仅使用滤波器)
+            x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
+            
+            # 用滤波器输出替代平滑器输出
+            x_tilde = x_hat[1:]  # 去掉初始状态
+            P_tilde = P[1:]      # 去掉初始协方差
+            
+            V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
+
+            likelihood = np.append(likelihood, [ell(H[i], R[i], z, x_hat_minus, P_minus)], axis=0)
+
+            # Convergence check
+            convergence_count = 0
+            if i >= 1 and likelihood[i + 1] - likelihood[i] < tol_likelihood:
+                convergence_count += 1
+
+            # M-step
+            A_1 = np.zeros((n, n))
+            A_2 = np.zeros((n, n))
+            A_3 = np.zeros((n, n))
+            A_4 = np.zeros((p, n))
+
+            for j in range(T):
+                if j == 0:
+                    A_1 += np.outer(x_tilde[j], xi[i].flatten()) + V[j] 
+                    A_2 += np.outer(xi[i].flatten(), xi[i].flatten()) + L[i]
+                else:
+                    A_1 += np.outer(x_tilde[j], x_tilde[j-1]) + V[j]
+                    A_2 += np.outer(x_tilde[j-1], x_tilde[j-1]) + P_tilde[j-1]
+                A_3 += np.outer(x_tilde[j], x_tilde[j]) + P_tilde[j]
+                A_4 += z[j] * x_tilde[j]
+
+            if "F" in em_vars:
+                F = np.append(F, [A_1 @ np.linalg.inv(A_2)], 0)
+                if i >= 1 and np.all(np.abs(F[i + 1] - F[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                F = np.append(F, [F_0], 0)
+
+            if "Q" in em_vars:
+                if "F" in em_vars:
+                    Q_i = (A_3 - F[i + 1] @ A_1.T) / T
+                else:
+                    Q_i = (A_3 - A_1 @ np.linalg.inv(A_2) @ A_1.T) / T
+
+                if not is_pos_def(Q_i):
+                    Q_i = force_SPD(Q_i)
+
+                Q = np.append(Q, [Q_i], 0)
+
+                if i >= 1 and np.all(np.abs(Q[i + 1] - Q[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                Q = np.append(Q, [Q_0], 0)
+
+            if "H" in em_vars:
+                H = np.append(H, [A_4 @ np.linalg.inv(A_3)], 0)
+                if i >= 1 and np.all(np.abs(H[i + 1] - H[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                H = np.append(H, [H_0], 0)
+
+            if "R" in em_vars:
+                if "H" in em_vars:
+                    R_i = float((A_5 - H[i + 1] @ A_4.T) / T)
+                else:
+                    R_i = float((A_5 - A_4 @ np.linalg.inv(A_3) @ A_4.T) / T)
+
+                R = np.append(R, [R_i], axis=0)
+                if i >= 1 and np.abs(R[i + 1] - R[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                R = np.append(R, [R_0], 0)
+
+            if "xi" in em_vars:
+                xi = np.append(xi, [x_tilde[0]], axis=0)
+                if i >= 1 and np.all(np.abs(xi[i + 1] - xi[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                xi = np.append(xi, [xi_0], 0)
+
+            if "L" in em_vars:
+                L = np.append(L, [P_tilde[0]], axis=0)
+                if i >= 1 and np.all(np.abs(L[i + 1] - L[i]) < tol_params):
+                    convergence_count += 1
+            else:
+                L = np.append(L, [L_0], axis=0)
+
+            if convergence_count == len(em_vars) + 1:
+                break
+
+        iterations = i + 1
+
+    # One-dimensional case
+    else:
+        A_5 = 0
+        for j in range(T):
+            A_5 += z[j] ** 2
+
+        for i in range(max_it):
+            # E-step (仅使用滤波器)
+            x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
+            
+            # 用滤波器输出替代平滑器输出
+            x_tilde = x_hat[1:]  # 去掉初始状态
+            P_tilde = P[1:]      # 去掉初始协方差
+            
+            V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
+
+            likelihood = np.append(likelihood, [ell(H[i], R[i], z, x_hat_minus, P_minus)], axis=0)
+
+            # Convergence check
+            convergence_count = 0
+            if i >= 1 and likelihood[i + 1] - likelihood[i] < tol_likelihood:
+                convergence_count += 1
+
+            # M-step
+            A_1 = 0
+            A_2 = 0
+            A_3 = 0
+            A_4 = 0
+
+            for j in range(T):
+                if j == 0:
+                    A_1 += x_tilde[j] * xi[i] + V[j]
+                    A_2 += xi[i] ** 2 + L[i]
+                else:
+                    A_1 += x_tilde[j] * x_tilde[j-1] + V[j]
+                    A_2 += x_tilde[j-1] ** 2 + P_tilde[j-1]
+                A_3 += x_tilde[j] ** 2 + P_tilde[j]
+                A_4 += z[j] * x_tilde[j]
+
+            if "F" in em_vars:
+                F = np.append(F, [A_1 / A_2], 0)
+                if i >= 1 and np.abs(F[i + 1] - F[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                F = np.append(F, [F_0], 0)
+
+            if "Q" in em_vars:
+                if "F" in em_vars:
+                    Q_i = (A_3 - F[i + 1] * A_1) / T
+                else:
+                    Q_i = (A_3 - A_1 ** 2 / A_2) / T
+
+                Q = np.append(Q, [Q_i], 0)
+
+                if i >= 1 and np.abs(Q[i + 1] - Q[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                Q = np.append(Q, [Q_0], 0)
+
+            if "H" in em_vars:
+                H = np.append(H, [A_4 / A_3], 0)
+                if i >= 1 and np.abs(H[i + 1] - H[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                H = np.append(H, [H_0], 0)
+
+            if "R" in em_vars:
+                if "H" in em_vars:
+                    R_i = (A_5 - H[i + 1] * A_4) / T
+                else:
+                    R_i = (A_5 - A_4 ** 2 / A_3) / T
+
+                R = np.append(R, [R_i], axis=0)
+                if i >= 1 and np.abs(R[i + 1] - R[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                R = np.append(R, [R_0], 0)
+
+            if "xi" in em_vars:
+                xi = np.append(xi, [x_tilde[0]], axis=0)
+                if i >= 1 and np.abs(xi[i + 1] - xi[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                xi = np.append(xi, [xi_0], 0)
+
+            if "L" in em_vars:
+                L = np.append(L, [P_tilde[0]], axis=0)
+                if i >= 1 and np.abs(L[i + 1] - L[i]) < tol_params:
+                    convergence_count += 1
+            else:
+                L = np.append(L, [L_0], axis=0)
+
+            if convergence_count == len(em_vars) + 1:
+                break
+
+        iterations = i + 1
+
+    likelihood = np.delete(likelihood, 0, axis=0)
+    return F, Q, H, R, xi, L, likelihood, iterations
 
 
 def main():
