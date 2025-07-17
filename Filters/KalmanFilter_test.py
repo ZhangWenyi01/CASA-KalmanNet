@@ -6,7 +6,7 @@ from Filters.Linear_KF import KalmanFilter
 
 def KFTest(args, SysModel, test_input, test_target, allStates=True,\
      randomInit = False, test_init=None, test_lengthMask=None,
-     changepoint = None,changeparameters:dict = None, first_dim_only=False):
+     changepoint = None,changeparameters:dict = None):
     
     if (changepoint is None and changeparameters is not None) or (changepoint is not None and changeparameters is None):
         raise ValueError("changepoint and changeparameters must be provided together or not at all")
@@ -26,20 +26,15 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
 
-    # MSE [Linear] - modify to support dimension-wise MSE when first_dim_only=True
-    if first_dim_only:
-        # Store MSE for position, velocity, acceleration separately
-        MSE_KF_linear_arr = torch.zeros(args.N_T, 3)  # 3 dimensions: pos, vel, acc
-        MSE_KF_linear_avg = torch.zeros(3)
-        MSE_KF_dB_avg = torch.zeros(3)
-    else:
-        MSE_KF_linear_arr = torch.zeros(args.N_T)
-        
+    # MSE [Linear] - Store both overall MSE and dimension-wise MSE
+    MSE_KF_linear_arr = torch.zeros(args.N_T)  # Overall MSE
+    MSE_KF_linear_arr_by_dim = torch.zeros(args.N_T, 3)  # Dimension-wise MSE: pos, vel, acc
+    
     # allocate memory for KF output
     KF_out = torch.zeros(args.N_T, SysModel.m, args.T_test)
     
-    # Determine which dimensions to calculate errors for
-    if not first_dim_only and not allStates:
+    # Determine which dimensions to calculate errors for (position only for original logic)
+    if not allStates:
         # Original logic: calculate position error
         loc = torch.tensor([True,False,False]) # for position only
         if SysModel.m == 2: 
@@ -89,31 +84,10 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     end = time.time()
     t = end - start
     
-    # MSE loss calculation
+    # MSE loss calculation - Calculate both overall MSE and dimension-wise MSE
     for j in range(args.N_T):# cannot use batch due to different length and std computation   
-        if first_dim_only:
-            # Calculate MSE for each dimension separately: position, velocity, acceleration
-            # Position (dimension 0)
-            if args.randomLength:
-                MSE_KF_linear_arr[j,0] = loss_fn(KF_out[j,0:1,test_lengthMask[j]], test_target[j,0:1,test_lengthMask[j]]).item()
-            else:      
-                MSE_KF_linear_arr[j,0] = loss_fn(KF_out[j,0:1,:], test_target[j,0:1,:]).item()
-            
-            # Velocity (dimension 1) if available
-            if SysModel.m > 1:
-                if args.randomLength:
-                    MSE_KF_linear_arr[j,1] = loss_fn(KF_out[j,1:2,test_lengthMask[j]], test_target[j,1:2,test_lengthMask[j]]).item()
-                else:      
-                    MSE_KF_linear_arr[j,1] = loss_fn(KF_out[j,1:2,:], test_target[j,1:2,:]).item()
-            
-            # Acceleration (dimension 2) if available
-            if SysModel.m > 2:
-                if args.randomLength:
-                    MSE_KF_linear_arr[j,2] = loss_fn(KF_out[j,2:3,test_lengthMask[j]], test_target[j,2:3,test_lengthMask[j]]).item()
-                else:      
-                    MSE_KF_linear_arr[j,2] = loss_fn(KF_out[j,2:3,:], test_target[j,2:3,:]).item()
-                    
-        elif allStates:
+        # Calculate overall MSE based on allStates parameter
+        if allStates:
             # Calculate error for all states
             if args.randomLength:
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
@@ -124,45 +98,67 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
             else:           
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,loc,:], test_target[j,loc,:]).item()
+        
+        # Calculate dimension-wise MSE for each dimension separately
+        # Position (dimension 0)
+        if args.randomLength:
+            MSE_KF_linear_arr_by_dim[j,0] = loss_fn(KF_out[j,0:1,test_lengthMask[j]], test_target[j,0:1,test_lengthMask[j]]).item()
+        else:      
+            MSE_KF_linear_arr_by_dim[j,0] = loss_fn(KF_out[j,0:1,:], test_target[j,0:1,:]).item()
+        
+        # Velocity (dimension 1) if available
+        if SysModel.m > 1:
+            if args.randomLength:
+                MSE_KF_linear_arr_by_dim[j,1] = loss_fn(KF_out[j,1:2,test_lengthMask[j]], test_target[j,1:2,test_lengthMask[j]]).item()
+            else:      
+                MSE_KF_linear_arr_by_dim[j,1] = loss_fn(KF_out[j,1:2,:], test_target[j,1:2,:]).item()
+        
+        # Acceleration (dimension 2) if available
+        if SysModel.m > 2:
+            if args.randomLength:
+                MSE_KF_linear_arr_by_dim[j,2] = loss_fn(KF_out[j,2:3,test_lengthMask[j]], test_target[j,2:3,test_lengthMask[j]]).item()
+            else:      
+                MSE_KF_linear_arr_by_dim[j,2] = loss_fn(KF_out[j,2:3,:], test_target[j,2:3,:]).item()
 
-    # Calculate averages and dB values
-    if first_dim_only:
-        MSE_KF_linear_avg = torch.mean(MSE_KF_linear_arr, dim=0)  # Average over trajectories for each dimension
-        MSE_KF_dB_avg = 10 * torch.log10(MSE_KF_linear_avg)
-        
-        # Standard deviation for each dimension
-        MSE_KF_linear_std = torch.std(MSE_KF_linear_arr, dim=0, unbiased=True)
-        KF_std_dB = 10 * torch.log10(MSE_KF_linear_std + MSE_KF_linear_avg) - MSE_KF_dB_avg
-        
-        # Output results for each dimension
-        print("KF MSE by Dimension:")
-        dimensions = ['Position', 'Velocity', 'Acceleration']
-        for dim_idx in range(min(3, SysModel.m)):
-            dim_name = dimensions[dim_idx]
-            print(f"  {dim_name}: {MSE_KF_dB_avg[dim_idx]:.6f} dB")
-    else:
-        MSE_KF_linear_avg = torch.mean(MSE_KF_linear_arr)
-        MSE_KF_dB_avg = 10 * torch.log10(MSE_KF_linear_avg)
-        
-        # Standard deviation
-        MSE_KF_linear_std = torch.std(MSE_KF_linear_arr, unbiased=True)
-        KF_std_dB = 10 * torch.log10(MSE_KF_linear_std + MSE_KF_linear_avg) - MSE_KF_dB_avg
-        
-        print(f"KF MSE: {MSE_KF_dB_avg:.6f} dB")
+    # Calculate averages and dB values for both overall and dimension-wise MSE
+    
+    # Overall MSE
+    MSE_KF_linear_avg = torch.mean(MSE_KF_linear_arr)
+    MSE_KF_dB_avg = 10 * torch.log10(MSE_KF_linear_avg)
+    MSE_KF_linear_std = torch.std(MSE_KF_linear_arr, unbiased=True)
+    KF_std_dB = 10 * torch.log10(MSE_KF_linear_std + MSE_KF_linear_avg) - MSE_KF_dB_avg
+    
+    # Dimension-wise MSE
+    MSE_KF_linear_avg_by_dim = torch.mean(MSE_KF_linear_arr_by_dim, dim=0)  # Average over trajectories for each dimension
+    MSE_KF_dB_avg_by_dim = 10 * torch.log10(MSE_KF_linear_avg_by_dim)
+    MSE_KF_linear_std_by_dim = torch.std(MSE_KF_linear_arr_by_dim, dim=0, unbiased=True)
+    KF_std_dB_by_dim = 10 * torch.log10(MSE_KF_linear_std_by_dim + MSE_KF_linear_avg_by_dim) - MSE_KF_dB_avg_by_dim
+    
+    # Output results
+    print(f"KF MSE ({'All States' if allStates else 'Position Only'}): {MSE_KF_dB_avg:.6f} dB")
+    print("KF MSE by Dimension:")
+    dimensions = ['Position', 'Velocity', 'Acceleration']
+    for dim_idx in range(min(3, SysModel.m)):
+        dim_name = dimensions[dim_idx]
+        print(f"  {dim_name}: {MSE_KF_dB_avg_by_dim[dim_idx]:.6f} dB")
     
     # Print Run Time
     print("Inference Time:", t)
     
-    # Return results - include dimension-wise results if first_dim_only=True
-    if first_dim_only:
-        detailed_results = {
-            'MSE_position_dB': MSE_KF_dB_avg[0].item(),
-            'MSE_velocity_dB': MSE_KF_dB_avg[1].item() if SysModel.m > 1 else None,
-            'MSE_acceleration_dB': MSE_KF_dB_avg[2].item() if SysModel.m > 2 else None,
-            'MSE_linear_arr_by_dim': MSE_KF_linear_arr,  # [N_T, 3] array
-            'MSE_linear_avg_by_dim': MSE_KF_linear_avg,  # [3] array
-            'MSE_dB_avg_by_dim': MSE_KF_dB_avg  # [3] array
-        }
-        return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out]
-    else:
-        return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out]
+    # Return results - include both overall and dimension-wise results
+    detailed_results = {
+        # Overall MSE results
+        'MSE_linear_arr': MSE_KF_linear_arr,  # [N_T] array
+        'MSE_linear_avg': MSE_KF_linear_avg,  # scalar
+        'MSE_dB_avg': MSE_KF_dB_avg,  # scalar
+        
+        # Dimension-wise MSE results
+        'MSE_position_dB': MSE_KF_dB_avg_by_dim[0].item(),
+        'MSE_velocity_dB': MSE_KF_dB_avg_by_dim[1].item() if SysModel.m > 1 else None,
+        'MSE_acceleration_dB': MSE_KF_dB_avg_by_dim[2].item() if SysModel.m > 2 else None,
+        'MSE_linear_arr_by_dim': MSE_KF_linear_arr_by_dim,  # [N_T, 3] array
+        'MSE_linear_avg_by_dim': MSE_KF_linear_avg_by_dim,  # [3] array
+        'MSE_dB_avg_by_dim': MSE_KF_dB_avg_by_dim  # [3] array
+    }
+    
+    return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out, detailed_results]

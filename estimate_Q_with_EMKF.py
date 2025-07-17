@@ -955,7 +955,7 @@ def plot_adaptive_results(observations, true_states, adaptive_results, true_para
 def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true, 
                         window_size=50, overlap=20, Q_initial=None, 
                         max_iterations=50, verbose=False, true_init_state=None,
-                        allStates=True, init_covariance=None, first_dim_only=False):
+                        allStates=True, init_covariance=None):
     """
     Sliding Window EMKF for adaptive Q matrix estimation
     
@@ -973,7 +973,6 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     true_init_state: true initial state, if None uses first true state
     allStates: if True, compute MSE on all states; if False, only position (same as KF test)
     init_covariance: initial covariance matrix (n, n), if None uses identity
-    first_dim_only: if True, compute MSE for position, velocity, acceleration separately
     
     Returns:
     dict containing:
@@ -981,7 +980,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
     - 'final_Q': Final estimated Q matrix
     - 'filtered_states': All filtered states using adaptive Q
     - 'Q_history': History of Q estimates per window
-    - 'detailed_mse': Detailed MSE information (if first_dim_only=True)
+    - 'detailed_mse': Detailed MSE information with dimension-wise results
     """
     
     # Convert inputs to numpy if they're tensors
@@ -1044,7 +1043,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         print(f"=== Sliding Window EMKF ===")
         print(f"Sequence length: {T}, State dim: {n}, Obs dim: {p}")
         print(f"Window size: {window_size}, Overlap: {overlap}")
-        print(f"AllStates: {allStates}, First Dim Only: {first_dim_only}")
+        print(f"AllStates: {allStates}")
     
     # Use larger, less frequent windows for stability
     effective_window_size = max(window_size, min(50, T//2))
@@ -1113,26 +1112,9 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         # Use smoothed estimates (x_tilde[1:] to align with true_states)
         filtered_states = x_tilde[1:]  # Remove initial state
         
-        # Calculate MSE based on first_dim_only parameter
-        if first_dim_only:
-            # Calculate MSE for each dimension separately
-            position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
-            position_mse_db = 10 * np.log10(position_mse_linear)
-            
-            velocity_mse_linear = np.mean((filtered_states[:, 1] - true_states[:, 1]) ** 2) if n > 1 else None
-            velocity_mse_db = 10 * np.log10(velocity_mse_linear) if velocity_mse_linear is not None else None
-            
-            acceleration_mse_linear = np.mean((filtered_states[:, 2] - true_states[:, 2]) ** 2) if n > 2 else None
-            acceleration_mse_db = 10 * np.log10(acceleration_mse_linear) if acceleration_mse_linear is not None else None
-            
-            # For compatibility, still return the main mse_loss
-            if allStates:
-                full_state_mse_linear = np.mean((filtered_states - true_states) ** 2)
-                mse_loss = 10 * np.log10(full_state_mse_linear)
-            else:
-                mse_loss = position_mse_db
-                
-        elif allStates:
+        # Calculate MSE - both overall and dimension-wise
+        # Overall MSE based on allStates parameter
+        if allStates:
             # Calculate MSE for all states (consistent with KF test allStates=True)
             mse_linear = np.mean((filtered_states - true_states) ** 2)
             mse_loss = 10 * np.log10(mse_linear)
@@ -1141,6 +1123,16 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
             position_mse = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
             mse_loss = 10 * np.log10(position_mse)
         
+        # Calculate dimension-wise MSE
+        position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
+        position_mse_db = 10 * np.log10(position_mse_linear)
+        
+        velocity_mse_linear = np.mean((filtered_states[:, 1] - true_states[:, 1]) ** 2) if n > 1 else None
+        velocity_mse_db = 10 * np.log10(velocity_mse_linear) if velocity_mse_linear is not None else None
+        
+        acceleration_mse_linear = np.mean((filtered_states[:, 2] - true_states[:, 2]) ** 2) if n > 2 else None
+        acceleration_mse_db = 10 * np.log10(acceleration_mse_linear) if acceleration_mse_linear is not None else None
+        
         # Calculate separate MSEs for compatibility - both linear and dB values
         position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
         position_mse_db = 10 * np.log10(position_mse_linear)
@@ -1148,28 +1140,24 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         full_state_mse_linear = np.mean((filtered_states - true_states) ** 2)
         full_state_mse_db = 10 * np.log10(full_state_mse_linear)
         
-        # Detailed MSE information for first_dim_only mode
-        detailed_mse_results = None
-        if first_dim_only:
-            detailed_mse_results = {
-                'MSE_position_dB': position_mse_db,
-                'MSE_velocity_dB': velocity_mse_db if n > 1 else None,
-                'MSE_acceleration_dB': acceleration_mse_db if n > 2 else None,
-                'mse_position_linear': position_mse_linear,
-                'mse_velocity_linear': velocity_mse_linear if n > 1 else None,
-                'mse_acceleration_linear': acceleration_mse_linear if n > 2 else None
-            }
+        # Detailed MSE information including dimension-wise results
+        detailed_mse_results = {
+            'MSE_position_dB': position_mse_db,
+            'MSE_velocity_dB': velocity_mse_db if n > 1 else None,
+            'MSE_acceleration_dB': acceleration_mse_db if n > 2 else None,
+            'mse_position_linear': position_mse_linear,
+            'mse_velocity_linear': velocity_mse_linear if n > 1 else None,
+            'mse_acceleration_linear': acceleration_mse_linear if n > 2 else None
+        }
         
         if verbose:
-            if first_dim_only:
-                print("EMKF MSE by Dimension:")
-                print(f"  Position: {position_mse_db:.4f} dB")
-                if n > 1:
-                    print(f"  Velocity: {velocity_mse_db:.4f} dB")
-                if n > 2:
-                    print(f"  Acceleration: {acceleration_mse_db:.4f} dB")
-            else:
-                print(f"MSE ({'all states' if allStates else 'position only'}): {mse_loss:.4f} dB")
+            print(f"EMKF MSE ({'all states' if allStates else 'position only'}): {mse_loss:.4f} dB")
+            print("EMKF MSE by Dimension:")
+            print(f"  Position: {position_mse_db:.4f} dB")
+            if n > 1:
+                print(f"  Velocity: {velocity_mse_db:.4f} dB")
+            if n > 2:
+                print(f"  Acceleration: {acceleration_mse_db:.4f} dB")
         
         return {
             'mse_loss': mse_loss,  # Main MSE based on allStates parameter

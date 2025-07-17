@@ -267,9 +267,8 @@ args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
 # Kalman Filter processing
 
-full_dim = True
-unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,test_target_CPD,test_init_CPD,first_dim_only=not full_dim)
-[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out] = KFTest(args, 
+unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,test_target_CPD,test_init_CPD)
+[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out, KF_detailed_results] = KFTest(args, 
                                  sys_model_KF, 
                                  test_input_CPD, 
                                  test_target_CPD, 
@@ -277,8 +276,7 @@ unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,te
                                  test_init=test_init_CPD,
                                  randomInit= True,
                                  changepoint=test_ChangePoint,
-                                 changeparameters=change_point_params,
-                                 first_dim_only=not full_dim)
+                                 changeparameters=change_point_params)
 
 
 # Run EMKF for all trajectories
@@ -306,8 +304,7 @@ for traj_idx in range(args.N_T):
         verbose=False,
         true_init_state=current_init,
         allStates=Loss_On_AllState,  # Ensure consistency with KF test allStates parameter
-        init_covariance=m2x_0.cpu().numpy(),  # 🔥 Use the same initial covariance matrix as KF test
-        first_dim_only=not full_dim  # Enable dimension-wise MSE calculation
+        init_covariance=m2x_0.cpu().numpy()  # 🔥 Use the same initial covariance matrix as KF test
     )
     
     if sliding_results['filtered_states'] is not None:
@@ -317,34 +314,47 @@ for traj_idx in range(args.N_T):
         emkf_mse_array.append(sliding_results['mse_loss'])
         
         # Store detailed MSE results for dimension-wise analysis
-        if sliding_results['detailed_mse'] is not None:
-            emkf_detailed_results.append(sliding_results['detailed_mse'])
-        else:
-            emkf_detailed_results.append(None)
+        emkf_detailed_results.append(sliding_results['detailed_mse'])
     else:
         emkf_mse_array.append(float('inf'))
         emkf_position_mse_array.append(float('inf'))
         emkf_full_state_mse_array.append(float('inf'))
-        emkf_detailed_results.append(None)
+        emkf_detailed_results.append({
+            'MSE_position_dB': float('inf'),
+            'MSE_velocity_dB': float('inf'),
+            'MSE_acceleration_dB': float('inf'),
+            'mse_position_linear': float('inf'),
+            'mse_velocity_linear': float('inf'),
+            'mse_acceleration_linear': float('inf')
+        })
 
 # Calculate EMKF average performance with dimension-wise output (following KF test logic)
 if emkf_mse_array:
     valid_results = [x for x in emkf_mse_array if x != float('inf')]
     if valid_results:
         # Get valid detailed results
-        valid_detailed = [x for x in emkf_detailed_results if x is not None]
+        valid_detailed = [x for x in emkf_detailed_results if x['mse_position_linear'] != float('inf')]
         
         if valid_detailed:
             # Calculate dimension-wise statistics using linear MSE averaging (consistent with KF test)
             position_linear_results = [x['mse_position_linear'] for x in valid_detailed]
-            velocity_linear_results = [x['mse_velocity_linear'] for x in valid_detailed if x['mse_velocity_linear'] is not None]
-            acceleration_linear_results = [x['mse_acceleration_linear'] for x in valid_detailed if x['mse_acceleration_linear'] is not None]
+            velocity_linear_results = [x['mse_velocity_linear'] for x in valid_detailed if x['mse_velocity_linear'] is not None and x['mse_velocity_linear'] != float('inf')]
+            acceleration_linear_results = [x['mse_acceleration_linear'] for x in valid_detailed if x['mse_acceleration_linear'] is not None and x['mse_acceleration_linear'] != float('inf')]
             
             # Calculate averages and convert to dB (following KF test and Pipeline_Unsupervised logic)
             position_avg_linear = np.mean(position_linear_results)
             position_avg_dB = 10 * np.log10(position_avg_linear)
             
-            # Output in consistent format with other algorithms
+            # Calculate overall MSE from linear values
+            position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
+            full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
+            
+            print("EMKF Results:")
+            if full_state_valid:
+                full_state_avg_linear = np.mean(full_state_valid)
+                full_state_avg_dB = 10 * np.log10(full_state_avg_linear)
+                print(f"  Overall MSE: {full_state_avg_dB:.6f} dB")
+            
             print("EMKF MSE by Dimension:")
             print(f"  Position: {position_avg_dB:.6f} dB")
             if velocity_linear_results:
@@ -356,22 +366,7 @@ if emkf_mse_array:
                 acceleration_avg_dB = 10 * np.log10(acceleration_avg_linear)
                 print(f"  Acceleration: {acceleration_avg_dB:.6f} dB")
         else:
-            # Fallback to old format if detailed results not available
-            position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
-            full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
-            
-            if position_valid:
-                # Calculate average of linear MSE values, then convert to dB
-                position_avg_linear = np.mean(position_valid)
-                position_avg_dB = 10 * np.log10(position_avg_linear)
-                print(f"EMKF MSE (Position): {position_avg_dB:.6f} dB")
-                
-            if full_state_valid:
-                # Calculate average of linear MSE values, then convert to dB
-                full_state_avg_linear = np.mean(full_state_valid)
-                full_state_avg_dB = 10 * np.log10(full_state_avg_linear)
-                print(f"EMKF MSE (Full State): {full_state_avg_dB:.6f} dB")
-                
+            print(f"EMKF: All trajectories failed")
     else:
         print(f"EMKF: All trajectories failed")
 else:

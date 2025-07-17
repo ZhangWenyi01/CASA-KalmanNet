@@ -37,7 +37,7 @@ H_onlyPos = torch.tensor([[1, 0, 0]]).float()
 ###############################################
 # Noise Parameters
 v = 0 # dB
-gamma = -5
+gamma = 0
 linear_factor = 10 ** (gamma / 10)
 r2 = torch.tensor([1/linear_factor]).float()
 q2 = r2*10 ** (v / 10)

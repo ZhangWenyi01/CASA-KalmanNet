@@ -61,7 +61,7 @@ class Pipeline_Unsupervised:
         self.optimizer = torch.optim.Adam(self.KNetmodel.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
         
 
-    def Unsupervised_CPD_Online(self, SysModel,y_observation,x_true,train_init, first_dim_only=False):
+    def Unsupervised_CPD_Online(self, SysModel,y_observation,x_true,train_init):
         
         self.N_T = len(y_observation)  # Number of trajectories
         self.stride = 5
@@ -101,16 +101,16 @@ class Pipeline_Unsupervised:
         self.observation_unsupervised = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_unsupervised = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
         
-        # Modify MSE storage arrays to support dimension-wise MSE when first_dim_only=True
-        if first_dim_only:
-            # Store MSE for position, velocity, acceleration separately
-            self.MSE_Original_linear_arr = torch.empty((self.N_T, 3))  # 3 dimensions: pos, vel, acc
-            self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T, 3))
-            self.MSE_Ours_linear_arr = torch.empty((self.N_T, 3))
-        else:
-            self.MSE_Original_linear_arr = torch.empty((self.N_T,))
-            self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T,))
-            self.MSE_Ours_linear_arr = torch.empty((self.N_T,))
+        # MSE storage arrays for both overall and dimension-wise MSE
+        # Overall MSE arrays
+        self.MSE_Original_linear_arr = torch.empty((self.N_T,))
+        self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T,))
+        self.MSE_Ours_linear_arr = torch.empty((self.N_T,))
+        
+        # Dimension-wise MSE arrays
+        self.MSE_Original_linear_arr_by_dim = torch.empty((self.N_T, 3))  # 3 dimensions: pos, vel, acc
+        self.MSE_Unsupervised_linear_arr_by_dim = torch.empty((self.N_T, 3))
+        self.MSE_Ours_linear_arr_by_dim = torch.empty((self.N_T, 3))
         
         # Start looping over trajectories
         for trajectorie in range(self.N_T):
@@ -231,52 +231,52 @@ class Pipeline_Unsupervised:
             loss_fn = torch.nn.MSELoss(reduction='mean')  # Fix: Use consistent calculation method as KF
             
             # Calculate MSE for Original model
-            if first_dim_only:
-                # Calculate MSE for each dimension separately: position, velocity, acceleration
-                # Position (dimension 0)
-                self.MSE_Original_linear_arr[trajectorie,0] = loss_fn(self.state_original[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
-                
-                # Velocity (dimension 1) if available
-                if self.ssModel.m > 1:
-                    self.MSE_Original_linear_arr[trajectorie,1] = loss_fn(self.state_original[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
-                
-                # Acceleration (dimension 2) if available
-                if self.ssModel.m > 2:
-                    self.MSE_Original_linear_arr[trajectorie,2] = loss_fn(self.state_original[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
-            else:
-                self.MSE_Original_linear_arr[trajectorie] = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            # Overall MSE
+            self.MSE_Original_linear_arr[trajectorie] = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            
+            # Dimension-wise MSE
+            # Position (dimension 0)
+            self.MSE_Original_linear_arr_by_dim[trajectorie,0] = loss_fn(self.state_original[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+            
+            # Velocity (dimension 1) if available
+            if self.ssModel.m > 1:
+                self.MSE_Original_linear_arr_by_dim[trajectorie,1] = loss_fn(self.state_original[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+            
+            # Acceleration (dimension 2) if available
+            if self.ssModel.m > 2:
+                self.MSE_Original_linear_arr_by_dim[trajectorie,2] = loss_fn(self.state_original[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
             
             # Calculate MSE for CPD-Unsupervised model
-            if first_dim_only:
-                # Calculate MSE for each dimension separately: position, velocity, acceleration
-                # Position (dimension 0)
-                self.MSE_Ours_linear_arr[trajectorie,0] = loss_fn(self.state_predictions[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
-                
-                # Velocity (dimension 1) if available
-                if self.ssModel.m > 1:
-                    self.MSE_Ours_linear_arr[trajectorie,1] = loss_fn(self.state_predictions[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
-                
-                # Acceleration (dimension 2) if available
-                if self.ssModel.m > 2:
-                    self.MSE_Ours_linear_arr[trajectorie,2] = loss_fn(self.state_predictions[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
-            else:
-                self.MSE_Ours_linear_arr[trajectorie] = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            # Overall MSE
+            self.MSE_Ours_linear_arr[trajectorie] = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            
+            # Dimension-wise MSE
+            # Position (dimension 0)
+            self.MSE_Ours_linear_arr_by_dim[trajectorie,0] = loss_fn(self.state_predictions[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+            
+            # Velocity (dimension 1) if available
+            if self.ssModel.m > 1:
+                self.MSE_Ours_linear_arr_by_dim[trajectorie,1] = loss_fn(self.state_predictions[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+            
+            # Acceleration (dimension 2) if available
+            if self.ssModel.m > 2:
+                self.MSE_Ours_linear_arr_by_dim[trajectorie,2] = loss_fn(self.state_predictions[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
             
             # Calculate MSE for Pure Unsupervised model
-            if first_dim_only:
-                # Calculate MSE for each dimension separately: position, velocity, acceleration
-                # Position (dimension 0)
-                self.MSE_Unsupervised_linear_arr[trajectorie,0] = loss_fn(self.state_unsupervised[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
-                
-                # Velocity (dimension 1) if available
-                if self.ssModel.m > 1:
-                    self.MSE_Unsupervised_linear_arr[trajectorie,1] = loss_fn(self.state_unsupervised[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
-                
-                # Acceleration (dimension 2) if available
-                if self.ssModel.m > 2:
-                    self.MSE_Unsupervised_linear_arr[trajectorie,2] = loss_fn(self.state_unsupervised[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
-            else:
-                self.MSE_Unsupervised_linear_arr[trajectorie] = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            # Overall MSE
+            self.MSE_Unsupervised_linear_arr[trajectorie] = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            
+            # Dimension-wise MSE
+            # Position (dimension 0)
+            self.MSE_Unsupervised_linear_arr_by_dim[trajectorie,0] = loss_fn(self.state_unsupervised[trajectorie,0:1,:].cpu().detach(), x_true[trajectorie,0:1,:].cpu().detach()).item()
+            
+            # Velocity (dimension 1) if available
+            if self.ssModel.m > 1:
+                self.MSE_Unsupervised_linear_arr_by_dim[trajectorie,1] = loss_fn(self.state_unsupervised[trajectorie,1:2,:].cpu().detach(), x_true[trajectorie,1:2,:].cpu().detach()).item()
+            
+            # Acceleration (dimension 2) if available
+            if self.ssModel.m > 2:
+                self.MSE_Unsupervised_linear_arr_by_dim[trajectorie,2] = loss_fn(self.state_unsupervised[trajectorie,2:3,:].cpu().detach(), x_true[trajectorie,2:3,:].cpu().detach()).item()
             
             
         # Calculate time statistics
@@ -287,95 +287,73 @@ class Pipeline_Unsupervised:
         unsupervised_mean_time = self.only_unsupervised_compute_times.mean().item()
         unsupervised_std_time = self.only_unsupervised_compute_times.std().item()
         
-        # Calculate averages and dB values (following KalmanFilter_test.py logic)
-        if first_dim_only:
-            # Calculate averages and standard deviations for each dimension
-            MSE_Original_linear_avg = torch.mean(self.MSE_Original_linear_arr, dim=0)  # Average over trajectories for each dimension
-            MSE_Original_dB_avg = 10 * torch.log10(MSE_Original_linear_avg)
-            MSE_Original_linear_std = torch.std(self.MSE_Original_linear_arr, dim=0, unbiased=True)
-            Original_std_dB = 10 * torch.log10(MSE_Original_linear_std + MSE_Original_linear_avg) - MSE_Original_dB_avg
-            
-            MSE_Ours_linear_avg = torch.mean(self.MSE_Ours_linear_arr, dim=0)
-            MSE_Ours_dB_avg = 10 * torch.log10(MSE_Ours_linear_avg)
-            MSE_Ours_linear_std = torch.std(self.MSE_Ours_linear_arr, dim=0, unbiased=True)
-            Ours_std_dB = 10 * torch.log10(MSE_Ours_linear_std + MSE_Ours_linear_avg) - MSE_Ours_dB_avg
-            
-            MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr, dim=0)
-            MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
-            MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, dim=0, unbiased=True)
-            Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
-        else:
-            MSE_Original_linear_avg = torch.mean(self.MSE_Original_linear_arr)
-            MSE_Original_dB_avg = 10 * torch.log10(MSE_Original_linear_avg)
-            MSE_Original_linear_std = torch.std(self.MSE_Original_linear_arr, unbiased=True)
-            Original_std_dB = 10 * torch.log10(MSE_Original_linear_std + MSE_Original_linear_avg) - MSE_Original_dB_avg
-            
-            MSE_Ours_linear_avg = torch.mean(self.MSE_Ours_linear_arr)
-            MSE_Ours_dB_avg = 10 * torch.log10(MSE_Ours_linear_avg)
-            MSE_Ours_linear_std = torch.std(self.MSE_Ours_linear_arr, unbiased=True)
-            Ours_std_dB = 10 * torch.log10(MSE_Ours_linear_std + MSE_Ours_linear_avg) - MSE_Ours_dB_avg
-            
-            MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr)
-            MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
-            MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, unbiased=True)
-            Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
+        # Calculate averages and dB values for both overall and dimension-wise MSE
+        
+        # Overall MSE
+        MSE_Original_linear_avg = torch.mean(self.MSE_Original_linear_arr)
+        MSE_Original_dB_avg = 10 * torch.log10(MSE_Original_linear_avg)
+        MSE_Original_linear_std = torch.std(self.MSE_Original_linear_arr, unbiased=True)
+        Original_std_dB = 10 * torch.log10(MSE_Original_linear_std + MSE_Original_linear_avg) - MSE_Original_dB_avg
+        
+        MSE_Ours_linear_avg = torch.mean(self.MSE_Ours_linear_arr)
+        MSE_Ours_dB_avg = 10 * torch.log10(MSE_Ours_linear_avg)
+        MSE_Ours_linear_std = torch.std(self.MSE_Ours_linear_arr, unbiased=True)
+        Ours_std_dB = 10 * torch.log10(MSE_Ours_linear_std + MSE_Ours_linear_avg) - MSE_Ours_dB_avg
+        
+        MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr)
+        MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
+        MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, unbiased=True)
+        Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
+        
+        # Dimension-wise MSE
+        MSE_Original_linear_avg_by_dim = torch.mean(self.MSE_Original_linear_arr_by_dim, dim=0)
+        MSE_Original_dB_avg_by_dim = 10 * torch.log10(MSE_Original_linear_avg_by_dim)
+        MSE_Original_linear_std_by_dim = torch.std(self.MSE_Original_linear_arr_by_dim, dim=0, unbiased=True)
+        Original_std_dB_by_dim = 10 * torch.log10(MSE_Original_linear_std_by_dim + MSE_Original_linear_avg_by_dim) - MSE_Original_dB_avg_by_dim
+        
+        MSE_Ours_linear_avg_by_dim = torch.mean(self.MSE_Ours_linear_arr_by_dim, dim=0)
+        MSE_Ours_dB_avg_by_dim = 10 * torch.log10(MSE_Ours_linear_avg_by_dim)
+        MSE_Ours_linear_std_by_dim = torch.std(self.MSE_Ours_linear_arr_by_dim, dim=0, unbiased=True)
+        Ours_std_dB_by_dim = 10 * torch.log10(MSE_Ours_linear_std_by_dim + MSE_Ours_linear_avg_by_dim) - MSE_Ours_dB_avg_by_dim
+        
+        MSE_Unsupervised_linear_avg_by_dim = torch.mean(self.MSE_Unsupervised_linear_arr_by_dim, dim=0)
+        MSE_Unsupervised_dB_avg_by_dim = 10 * torch.log10(MSE_Unsupervised_linear_avg_by_dim)
+        MSE_Unsupervised_linear_std_by_dim = torch.std(self.MSE_Unsupervised_linear_arr_by_dim, dim=0, unbiased=True)
+        Unsupervised_std_dB_by_dim = 10 * torch.log10(MSE_Unsupervised_linear_std_by_dim + MSE_Unsupervised_linear_avg_by_dim) - MSE_Unsupervised_dB_avg_by_dim
         
         # Display comprehensive performance and computation time statistics
         print('\n' + '='*90)
-        if first_dim_only:
-            print('     Algorithm Performance by Dimension (Position, Velocity, Acceleration) and Computation Time     ')
-        else:
-            print('                    Algorithm Performance and Computation Time Statistics                    ')
+        print('                    Algorithm Performance and Computation Time Statistics                    ')
         print('='*90)
         
-        if first_dim_only:
-            # Display results for each dimension separately
-            print(f'{"Algorithm Name":<20} {"Dimension":<12} {"MSE (dB)":<12} {"STD (dB)":<12} {"Avg Time (s)":<12} {"Time Std":<12} {"Efficiency":<12}')
-            print('-'*90)
-            
-            # Calculate efficiency rating
-            fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
-            original_efficiency = fastest_time/original_mean_time
-            cpd_efficiency = fastest_time/cpd_mean_time
-            unsupervised_efficiency = fastest_time/unsupervised_mean_time
-            
-            # Original KalmanNet results
-            dimensions = ['Position', 'Velocity', 'Acceleration']
-            for dim_idx in range(min(3, self.ssModel.m)):  # Only show available dimensions
-                dim_name = dimensions[dim_idx]
-                if dim_idx == 0:  # Show timing info only for first dimension
-                    print(f'{"Original KalmanNet":<20} {dim_name:<12} {MSE_Original_dB_avg[dim_idx].item():<12.4f} {Original_std_dB[dim_idx].item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
-                else:
-                    print(f'{"":<20} {dim_name:<12} {MSE_Original_dB_avg[dim_idx].item():<12.4f} {Original_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
-            
-            # CPDNet-Unsupervised results
-            for dim_idx in range(min(3, self.ssModel.m)):
-                dim_name = dimensions[dim_idx]
-                if dim_idx == 0:  # Show timing info only for first dimension
-                    print(f'{"CPDNet-Unsupervised":<20} {dim_name:<12} {MSE_Ours_dB_avg[dim_idx].item():<12.4f} {Ours_std_dB[dim_idx].item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
-                else:
-                    print(f'{"":<20} {dim_name:<12} {MSE_Ours_dB_avg[dim_idx].item():<12.4f} {Ours_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
-            
-            # Pure Unsupervised results
-            for dim_idx in range(min(3, self.ssModel.m)):
-                dim_name = dimensions[dim_idx]
-                if dim_idx == 0:  # Show timing info only for first dimension
-                    print(f'{"Pure Unsupervised":<20} {dim_name:<12} {MSE_Unsupervised_dB_avg[dim_idx].item():<12.4f} {Unsupervised_std_dB[dim_idx].item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
-                else:
-                    print(f'{"":<20} {dim_name:<12} {MSE_Unsupervised_dB_avg[dim_idx].item():<12.4f} {Unsupervised_std_dB[dim_idx].item():<12.4f} {"":<12} {"":<12} {"":<12}')
-        else:
-            print(f'{"Algorithm Name":<20} {"MSE (dB)":<12} {"STD (dB)":<12} {"Avg Time (s)":<12} {"Time Std":<12} {"Efficiency":<12}')
-            print('-'*90)
-            
-            # Calculate efficiency rating
-            fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
-            original_efficiency = fastest_time/original_mean_time
-            cpd_efficiency = fastest_time/cpd_mean_time
-            unsupervised_efficiency = fastest_time/unsupervised_mean_time
-            
-            print(f'{"Original KalmanNet":<20} {MSE_Original_dB_avg.item():<12.4f} {Original_std_dB.item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
-            print(f'{"CPDNet-Unsupervised":<20} {MSE_Ours_dB_avg.item():<12.4f} {Ours_std_dB.item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
-            print(f'{"Pure Unsupervised":<20} {MSE_Unsupervised_dB_avg.item():<12.4f} {Unsupervised_std_dB.item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
+        # Calculate efficiency rating
+        fastest_time = min(original_mean_time, cpd_mean_time, unsupervised_mean_time)
+        original_efficiency = fastest_time/original_mean_time
+        cpd_efficiency = fastest_time/cpd_mean_time
+        unsupervised_efficiency = fastest_time/unsupervised_mean_time
+        
+        # Overall MSE results
+        print(f'{"Algorithm Name":<20} {"Overall MSE (dB)":<15} {"STD (dB)":<12} {"Avg Time (s)":<12} {"Time Std":<12} {"Efficiency":<12}')
+        print('-'*90)
+        print(f'{"Original KalmanNet":<20} {MSE_Original_dB_avg.item():<15.4f} {Original_std_dB.item():<12.4f} {original_mean_time:<12.4f} {original_std_time:<12.4f} {original_efficiency:<12.2f}')
+        print(f'{"CPDNet-Unsupervised":<20} {MSE_Ours_dB_avg.item():<15.4f} {Ours_std_dB.item():<12.4f} {cpd_mean_time:<12.4f} {cpd_std_time:<12.4f} {cpd_efficiency:<12.2f}')
+        print(f'{"Pure Unsupervised":<20} {MSE_Unsupervised_dB_avg.item():<15.4f} {Unsupervised_std_dB.item():<12.4f} {unsupervised_mean_time:<12.4f} {unsupervised_std_time:<12.4f} {unsupervised_efficiency:<12.2f}')
+        
+        # Dimension-wise MSE results
+        print('\n' + '='*90)
+        print('                    Algorithm Performance by Dimension                    ')
+        print('='*90)
+        print(f'{"Algorithm Name":<20} {"Dimension":<12} {"MSE (dB)":<12} {"STD (dB)":<12}')
+        print('-'*90)
+        
+        dimensions = ['Position', 'Velocity', 'Acceleration']
+        for dim_idx in range(min(3, self.ssModel.m)):  # Only show available dimensions
+            dim_name = dimensions[dim_idx]
+            print(f'{"Original KalmanNet":<20} {dim_name:<12} {MSE_Original_dB_avg_by_dim[dim_idx].item():<12.4f} {Original_std_dB_by_dim[dim_idx].item():<12.4f}')
+            print(f'{"CPDNet-Unsupervised":<20} {dim_name:<12} {MSE_Ours_dB_avg_by_dim[dim_idx].item():<12.4f} {Ours_std_dB_by_dim[dim_idx].item():<12.4f}')
+            print(f'{"Pure Unsupervised":<20} {dim_name:<12} {MSE_Unsupervised_dB_avg_by_dim[dim_idx].item():<12.4f} {Unsupervised_std_dB_by_dim[dim_idx].item():<12.4f}')
+            if dim_idx < min(3, self.ssModel.m) - 1:
+                print()  # Add blank line between dimensions
         
         print('='*90)
 
