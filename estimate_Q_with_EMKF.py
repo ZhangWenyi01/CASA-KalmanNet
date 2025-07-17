@@ -1141,7 +1141,7 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
             position_mse = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
             mse_loss = 10 * np.log10(position_mse)
         
-        # Calculate separate MSEs for compatibility
+        # Calculate separate MSEs for compatibility - both linear and dB values
         position_mse_linear = np.mean((filtered_states[:, 0] - true_states[:, 0]) ** 2)
         position_mse_db = 10 * np.log10(position_mse_linear)
         
@@ -1173,8 +1173,10 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
         
         return {
             'mse_loss': mse_loss,  # Main MSE based on allStates parameter
-            'position_mse_db': position_mse_db,  # Position-only MSE
-            'full_state_mse_db': full_state_mse_db,  # Full-state MSE
+            'position_mse_db': position_mse_db,  # Position-only MSE in dB
+            'full_state_mse_db': full_state_mse_db,  # Full-state MSE in dB
+            'position_mse_linear': position_mse_linear,  # Position-only MSE in linear scale
+            'full_state_mse_linear': full_state_mse_linear,  # Full-state MSE in linear scale
             'final_Q': final_Q,
             'filtered_states': filtered_states,
             'Q_history': Q_history,
@@ -1192,6 +1194,8 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
             'mse_loss': float('inf'),
             'position_mse_db': float('inf'),
             'full_state_mse_db': float('inf'),
+            'position_mse_linear': float('inf'),
+            'full_state_mse_linear': float('inf'),
             'final_Q': final_Q,
             'filtered_states': None,
             'Q_history': Q_history,

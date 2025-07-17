@@ -267,7 +267,7 @@ args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
 # Kalman Filter processing
 
-full_dim = False
+full_dim = True
 unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,test_target_CPD,test_init_CPD,first_dim_only=not full_dim)
 [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out] = KFTest(args, 
                                  sys_model_KF, 
@@ -312,8 +312,8 @@ for traj_idx in range(args.N_T):
     
     if sliding_results['filtered_states'] is not None:
         # Store linear MSE values (not dB) for proper averaging
-        emkf_position_mse_array.append(sliding_results['position_mse_db'])  # Keep for backward compatibility
-        emkf_full_state_mse_array.append(sliding_results['full_state_mse_db'])  # Keep for backward compatibility
+        emkf_position_mse_array.append(sliding_results['position_mse_linear'])  # Store linear values for correct averaging
+        emkf_full_state_mse_array.append(sliding_results['full_state_mse_linear'])  # Store linear values for correct averaging
         emkf_mse_array.append(sliding_results['mse_loss'])
         
         # Store detailed MSE results for dimension-wise analysis
@@ -358,7 +358,19 @@ if emkf_mse_array:
         else:
             # Fallback to old format if detailed results not available
             position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
-            print(f"EMKF MSE (Full State): {np.mean(emkf_full_state_mse_array):.6f} ± {np.std(emkf_full_state_mse_array):.6f} dB")
+            full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
+            
+            if position_valid:
+                # Calculate average of linear MSE values, then convert to dB
+                position_avg_linear = np.mean(position_valid)
+                position_avg_dB = 10 * np.log10(position_avg_linear)
+                print(f"EMKF MSE (Position): {position_avg_dB:.6f} dB")
+                
+            if full_state_valid:
+                # Calculate average of linear MSE values, then convert to dB
+                full_state_avg_linear = np.mean(full_state_valid)
+                full_state_avg_dB = 10 * np.log10(full_state_avg_linear)
+                print(f"EMKF MSE (Full State): {full_state_avg_dB:.6f} dB")
                 
     else:
         print(f"EMKF: All trajectories failed")

@@ -38,9 +38,9 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     # allocate memory for KF output
     KF_out = torch.zeros(args.N_T, SysModel.m, args.T_test)
     
-    # 确定要计算误差的维度
+    # Determine which dimensions to calculate errors for
     if not first_dim_only and not allStates:
-        # 原来的逻辑：计算位置误差
+        # Original logic: calculate position error
         loc = torch.tensor([True,False,False]) # for position only
         if SysModel.m == 2: 
             loc = torch.tensor([True,False]) # for position only
@@ -54,17 +54,17 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     else:
         KF.Init_batched_sequence(SysModel.m1x_0.view(1,SysModel.m,1).expand(args.N_T,-1,-1), SysModel.m2x_0.view(1,SysModel.m,SysModel.m).expand(args.N_T,-1,-1))           
     
-    # 修改GenerateBatch过程以处理参数变化
+    # Modify GenerateBatch process to handle parameter changes
     if change_happened:
-        # 首先处理到变化点之前的数据
+        # First process data before the change point
         KF.GenerateBatch(test_input[:, :, :changepoint])
         X_before = KF.x
         
-        # 🔥 保存变点处的状态和协方差，确保连续性
-        final_state = KF.m1x_posterior.clone()  # 变点前的最终状态
-        final_covariance = KF.m2x_posterior.clone()  # 变点前的最终协方差
+        # 🔥 Save state and covariance at change point to ensure continuity
+        final_state = KF.m1x_posterior.clone()  # Final state before change point
+        final_covariance = KF.m2x_posterior.clone()  # Final covariance before change point
         
-        # 在变化点处更新参数
+        # Update parameters at change point
         if changed_param == 'Q':
             KF.Q = Q_after.to(KF.device)
         elif changed_param == 'R':
@@ -74,10 +74,10 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
         elif changed_param == 'H':
             KF.H = H_after
         
-        # 🔥 重新初始化KF，使用变点处的状态作为新的初始条件
+        # 🔥 Re-initialize KF using state at change point as new initial condition
         KF.Init_batched_sequence(final_state, final_covariance)
             
-        # 继续处理变化点之后的数据
+        # Continue processing data after change point
         KF.GenerateBatch(test_input[:, :, changepoint:])
         x_after = torch.cat([X_before, KF.x], dim=2)
         KF_out = x_after
@@ -114,12 +114,12 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
                     MSE_KF_linear_arr[j,2] = loss_fn(KF_out[j,2:3,:], test_target[j,2:3,:]).item()
                     
         elif allStates:
-            # 计算所有状态的误差
+            # Calculate error for all states
             if args.randomLength:
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
             else:      
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,:,:], test_target[j,:,:]).item()
-        else: # mask on state (原来的逻辑)
+        else: # mask on state (original logic)
             if args.randomLength:
                 MSE_KF_linear_arr[j] = loss_fn(KF_out[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
             else:           
