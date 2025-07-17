@@ -388,10 +388,12 @@ class SystemModel:
                     mean = torch.zeros([size, self.m])
                     # Use appropriate Q based on change point
                     if t >= change_index and self.param_to_change == 'Q':
-                        # Sharp change
-                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q_afterCPD)
-                        # # Graduately
-                        # distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q*(1.4**(t-change_index)))
+                        if self.Q_afterCPD == 'grad':
+                            # Gradual change - use a more reasonable growth factor
+                            distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q*(1.05**(t-change_index)))
+                        else:
+                            # Sharp change
+                            distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q_afterCPD)
                     else:
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.Q)
                     eq = distrib.rsample().view(size,self.m,1)
@@ -412,8 +414,10 @@ class SystemModel:
                 elif self.n == 1: # 1 dim noise
                     # Use appropriate R based on change point
                     if t >= change_index and self.param_to_change == 'R':
-                        er = torch.normal(mean=torch.zeros(size), std=self.R_afterCPD).view(size,1,1)
-                        # er = torch.normal(mean=torch.zeros(size), std=self.R_afterCPD*(1.005**(t-change_index))).view(size,1,1)
+                        if self.R_afterCPD == 'grad':
+                            er = torch.normal(mean=torch.zeros(size), std=self.R*(1.02**(t-change_index))).view(size,1,1)
+                        else:
+                            er = torch.normal(mean=torch.zeros(size), std=self.R_afterCPD).view(size,1,1)
                     else:
                         er = torch.normal(mean=torch.zeros(size), std=self.R).view(size,1,1)
                     yt = torch.add(yt,er)
@@ -421,8 +425,12 @@ class SystemModel:
                     mean = torch.zeros([size,self.n])
                     # Use appropriate R based on change point
                     if t >= change_index and self.param_to_change == 'R':
-                        distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R_afterCPD)
-                        # distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R_afterCPD*(1.005**(t-change_index)))
+                        if self.R_afterCPD == 'grad':
+                            # Gradual change for R - use a more reasonable growth factor
+                            distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R*(1.02**(t-change_index)))
+                        else:
+                            # Sharp change for R
+                            distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R_afterCPD)
                     else:
                         distrib = MultivariateNormal(loc=mean, covariance_matrix=self.R)
                     er = distrib.rsample().view(size,self.n,1)

@@ -51,31 +51,77 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     
     # Modify GenerateBatch process to handle parameter changes
     if change_happened:
-        # First process data before the change point
-        KF.GenerateBatch(test_input[:, :, :changepoint])
-        X_before = KF.x
-        
-        # 🔥 Save state and covariance at change point to ensure continuity
-        final_state = KF.m1x_posterior.clone()  # Final state before change point
-        final_covariance = KF.m2x_posterior.clone()  # Final covariance before change point
-        
-        # Update parameters at change point
-        if changed_param == 'Q':
-            KF.Q = Q_after.to(KF.device)
-        elif changed_param == 'R':
-            KF.R = R_after.to(KF.device)
-        elif changed_param == 'F':
-            KF.F = F_after
-        elif changed_param == 'H':
-            KF.H = H_after
-        
-        # 🔥 Re-initialize KF using state at change point as new initial condition
-        KF.Init_batched_sequence(final_state, final_covariance)
+        # Check if we need gradual parameter change
+        if (changed_param == 'Q' and Q_after == 'grad') or (changed_param == 'R' and R_after == 'grad'):
+            # Handle gradual parameter change - process step by step
+            # First process data before the change point
+            KF.GenerateBatch(test_input[:, :, :changepoint])
+            X_before = KF.x
             
-        # Continue processing data after change point
-        KF.GenerateBatch(test_input[:, :, changepoint:])
-        x_after = torch.cat([X_before, KF.x], dim=2)
-        KF_out = x_after
+            # 🔥 Save state and covariance at change point to ensure continuity
+            final_state = KF.m1x_posterior.clone()  # Final state before change point
+            final_covariance = KF.m2x_posterior.clone()  # Final covariance before change point
+            
+            # Process data after change point with gradual parameter change
+            remaining_steps = test_input.shape[2] - changepoint
+            X_after = torch.zeros(args.N_T, SysModel.m, remaining_steps).to(KF.device)
+            
+            # Re-initialize KF using state at change point as new initial condition
+            KF.Init_batched_sequence(final_state, final_covariance)
+            
+            # Store original parameters
+            original_Q = KF.Q.clone()
+            original_R = KF.R.clone()
+            
+            # Process each time step after changepoint with updated parameters
+            for t in range(remaining_steps):
+                # Update parameters for this time step
+                if changed_param == 'Q' and Q_after == 'grad':
+                    # Use same factor as data generation: 1.05**(t-change_index) for Q
+                    # Note: t here is relative to changepoint, so we use t directly
+                    KF.Q = original_Q * (1.05 ** t)
+                elif changed_param == 'R' and R_after == 'grad':
+                    # Use same factor as data generation: 1.02**(t-change_index) for R
+                    # Note: t here is relative to changepoint, so we use t directly
+                    KF.R = original_R * (1.02 ** t)
+                
+                # Process one time step
+                KF.GenerateBatch(test_input[:, :, changepoint+t:changepoint+t+1])
+                X_after[:, :, t] = KF.x[:, :, 0]
+                
+                # Update state for next iteration
+                if t < remaining_steps - 1:
+                    KF.Init_batched_sequence(KF.m1x_posterior.clone(), KF.m2x_posterior.clone())
+            
+            # Concatenate results
+            KF_out = torch.cat([X_before, X_after], dim=2)
+        else:
+            # Handle sharp parameter change (original logic)
+            # First process data before the change point
+            KF.GenerateBatch(test_input[:, :, :changepoint])
+            X_before = KF.x
+            
+            # 🔥 Save state and covariance at change point to ensure continuity
+            final_state = KF.m1x_posterior.clone()  # Final state before change point
+            final_covariance = KF.m2x_posterior.clone()  # Final covariance before change point
+            
+            # Update parameters at change point
+            if changed_param == 'Q':
+                KF.Q = Q_after.to(KF.device)
+            elif changed_param == 'R':
+                KF.R = R_after.to(KF.device)
+            elif changed_param == 'F':
+                KF.F = F_after
+            elif changed_param == 'H':
+                KF.H = H_after
+            
+            # 🔥 Re-initialize KF using state at change point as new initial condition
+            KF.Init_batched_sequence(final_state, final_covariance)
+                
+            # Continue processing data after change point
+            KF.GenerateBatch(test_input[:, :, changepoint:])
+            x_after = torch.cat([X_before, KF.x], dim=2)
+            KF_out = x_after
         
     else:
         KF.GenerateBatch(test_input)

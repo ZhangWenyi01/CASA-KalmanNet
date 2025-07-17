@@ -20,24 +20,38 @@ F_gen = torch.tensor([[1, delta_t_gen,0.5*delta_t_gen**2],
                   [0,       1,       delta_t_gen],
                   [0,       0,         1]]).float()
 
-F_after = torch.tensor([[1.01, delta_t_gen,0.5*delta_t_gen**2],
-                  [0,       1,       delta_t_gen],
-                  [0,       0,         1]]).float()
 
 F_CV = torch.tensor([[1, delta_t_gen],
-                     [0,           1]]).float()              
+                     [0,           1]]).float()      
+
+# Set rotation angle (in radians), e.g., 30 degrees
+theta = torch.tensor(30.0) * torch.pi / 180  # Convert 30 degrees to radians
+
+# Build 2D rotation matrix for the given angle (rotate all components)
+# Here we assume rotation around z-axis, so z component remains unchanged, but x and y components rotate
+rotation_matrix = torch.tensor([
+    [torch.cos(theta), -torch.sin(theta), 0],
+    [torch.sin(theta),  torch.cos(theta), 0],
+    [0,                0,                1]
+])
+
+# Apply rotation matrix to F_gen
+F_rotated = rotation_matrix @ F_gen @ rotation_matrix.T
 
 # Full observation
 H_identity = torch.eye(3)
-# Observe only the postion
+# Observe only the position
 H_onlyPos = torch.tensor([[1, 0, 0]]).float()
+
+# Apply rotation matrix to H_onlyPos
+H_onlyPos_rotated = H_onlyPos @ rotation_matrix.T
 
 ###############################################
 ### process noise Q and observation noise R ###
 ###############################################
 # Noise Parameters
 v = 0 # dB
-gamma = 0
+gamma = -5
 linear_factor = 10 ** (gamma / 10)
 r2 = torch.tensor([1/linear_factor]).float()
 q2 = r2*10 ** (v / 10)

@@ -7,7 +7,7 @@ import Simulations.config as config
 import Simulations.utils as utils
 # MEKF Test
 from estimate_Q_with_EMKF import sliding_window_EMKF
-from Simulations.Linear_CPD.parameters import F_gen,F_CV,H_identity,H_onlyPos,\
+from Simulations.Linear_CPD.parameters import F_gen,F_CV,F_rotated,H_identity,H_onlyPos,H_onlyPos_rotated,\
    Q_gen,Q_CV,R_3,R_2,R_onlyPos,\
    m,m_cv
 
@@ -39,11 +39,11 @@ path_results_CPD = 'CPDNet/'
 
 # Change Point setting
 change_point_params = {
-   'changed_param':'Q',
-    'Q': Q_gen * 500,
-    'F': F_gen * 1.05,
-    'H': H_onlyPos * 0.95,
-    'R': R_onlyPos * 1.5
+   'changed_param':'R',
+    'Q': 'grad',
+    'R': 'grad',
+    'F': F_rotated,
+    'H': H_onlyPos_rotated
 }
 
 
@@ -272,7 +272,7 @@ unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,te
                                  sys_model_KF, 
                                  test_input_CPD, 
                                  test_target_CPD, 
-                                 allStates=Loss_On_AllState,
+                                 allStates=True,
                                  test_init=test_init_CPD,
                                  randomInit= True,
                                  changepoint=test_ChangePoint,
