@@ -39,8 +39,8 @@ path_results_CPD = 'CPDNet/'
 
 # Change Point setting
 change_point_params = {
-   'changed_param':'R',
-    'Q': 'grad',
+   'changed_param':'Q',
+    'Q': 50*Q_gen,
     'R': 'grad',
     'F': F_rotated,
     'H': H_onlyPos_rotated
@@ -258,26 +258,38 @@ sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.
 sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
 sys_model_KF = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
 sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
+sys_model_partial = SystemModel(F_gen, Q_gen*1000000, H_onlyPos, R_onlyPos*0.01, args.T, args.T_test)
+sys_model_partial.InitSequence(m1x_0, m2x_0)# x0 and P0
 
 unsupervised_pipeline = Pipeline_Unsupervised()
 unsupervised_pipeline.setCPDNet('CPDNet')
 unsupervised_pipeline.setKNet('KNet')
-unsupervised_pipeline.setssModel(sys_model_online)
+unsupervised_pipeline.setssModel(sys_model_partial)
 args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
 # Kalman Filter processing
 
-unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_online,test_input_CPD,test_target_CPD,test_init_CPD)
+unsupervised_pipeline.Unsupervised_CPD_Online(sys_model_partial,test_input_CPD,test_target_CPD,test_init_CPD)
+# [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out, KF_detailed_results] = KFTest(args, 
+#                                  sys_model_partial, 
+#                                  test_input_CPD, 
+#                                  test_target_CPD, 
+#                                  allStates=True,
+#                                  test_init=test_init_CPD,
+#                                  randomInit= True,
+#                                  changepoint=test_ChangePoint,
+#                                  changeparameters=change_point_params)
 [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, KF_out, KF_detailed_results] = KFTest(args, 
-                                 sys_model_KF, 
+                                 sys_model_partial, 
                                  test_input_CPD, 
                                  test_target_CPD, 
                                  allStates=True,
                                  test_init=test_init_CPD,
-                                 randomInit= True,
-                                 changepoint=test_ChangePoint,
-                                 changeparameters=change_point_params)
+                                 randomInit= True)
 
+
+# EMKF Configuration: True = Full Information (use change_point_params), False = Partial Information (use sys_model_partial)
+EMKF_FULL_INFO = False  # Change to True for Full Information mode
 
 # Run EMKF for all trajectories
 emkf_mse_array = []
@@ -291,20 +303,58 @@ for traj_idx in range(args.N_T):
     current_target = test_target_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 3)
     current_init = test_init_CPD[traj_idx, :, 0].cpu().numpy()  # Get true initial state
     
+    # Prepare EMKF parameters based on selected mode
+    if EMKF_FULL_INFO:
+        # Full Information mode: Use change_point_params (true generative parameters)
+        changed_param = change_point_params.get('changed_param', 'Q')
+        
+        # Initialize with original generative parameters
+        F_for_emkf = F_gen
+        H_for_emkf = H_onlyPos
+        R_for_emkf = R_onlyPos
+        Q_init_emkf = Q_gen
+        
+        # Only override the parameter that is marked for change
+        if changed_param == 'F':
+            F_for_emkf = change_point_params.get('F', F_gen)
+        elif changed_param == 'H':
+            H_for_emkf = change_point_params.get('H', H_onlyPos)
+        elif changed_param == 'Q':
+            Q_init_emkf = change_point_params.get('Q', Q_gen)
+        elif changed_param == 'R':
+            R_for_emkf = change_point_params.get('R', R_onlyPos)
+        
+        # Handle string values (like 'grad') by falling back to generative defaults
+        if isinstance(F_for_emkf, str):
+            F_for_emkf = F_gen
+        if isinstance(H_for_emkf, str):
+            H_for_emkf = H_onlyPos
+        if isinstance(R_for_emkf, str):
+            R_for_emkf = R_onlyPos
+        if isinstance(Q_init_emkf, str):
+            Q_init_emkf = Q_gen
+            
+    else:
+        # Partial Information mode: Use sys_model_partial (mismatched parameters, same as KF test)
+        F_for_emkf = sys_model_partial.F
+        H_for_emkf = sys_model_partial.H
+        R_for_emkf = sys_model_partial.R
+        Q_init_emkf = sys_model_partial.Q
+
     # Use more reasonable window parameters
     sliding_results = sliding_window_EMKF(
         observations=current_input,
         true_states=current_target,
-        F_true=F_gen.cpu().numpy(),
-        H_true=H_onlyPos.cpu().numpy(),
-        R_true=R_onlyPos.cpu().numpy(),
-        Q_initial=Q_gen.cpu().numpy(),
-        window_size=50,      # Increase window size
-        overlap=15,          # Reduce overlap
+        F_true=F_for_emkf.cpu().numpy(),
+        H_true=H_for_emkf.cpu().numpy(),
+        R_true=R_for_emkf.cpu().numpy(),
+        Q_initial=Q_init_emkf.cpu().numpy(),
+        window_size=50,
+        overlap=15,
         verbose=False,
         true_init_state=current_init,
-        allStates=Loss_On_AllState,  # Ensure consistency with KF test allStates parameter
-        init_covariance=m2x_0.cpu().numpy()  # 🔥 Use the same initial covariance matrix as KF test
+        allStates=True,
+        init_covariance=m2x_0.cpu().numpy()
     )
     
     if sliding_results['filtered_states'] is not None:
@@ -372,18 +422,3 @@ if emkf_mse_array:
 else:
     print(f"EMKF: No results")
     
-    
-# # Kalman Smoother processing
-# print("\n" + "="*60)
-# print("Running Kalman Smoother for comparison...")
-# print("="*60)
-# [MSE_KS_linear_arr, MSE_KS_linear_avg, MSE_KS_dB_avg, KS_out, ks_detailed] = KSTest(args, 
-#                                  sys_model_KF, 
-#                                  test_input_CPD, 
-#                                  test_target_CPD, 
-#                                  allStates=Loss_On_AllState,
-#                                  test_init=test_init_CPD,
-#                                  randomInit=True,
-#                                  changepoint=test_ChangePoint,
-#                                  changeparameters=change_point_params,
-#                                  first_dim_only=True)

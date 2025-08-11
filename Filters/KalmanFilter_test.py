@@ -181,15 +181,26 @@ def KFTest(args, SysModel, test_input, test_target, allStates=True,\
     KF_std_dB_by_dim = 10 * torch.log10(MSE_KF_linear_std_by_dim + MSE_KF_linear_avg_by_dim) - MSE_KF_dB_avg_by_dim
     
     # Output results
-    print(f"KF MSE ({'All States' if allStates else 'Position Only'}): {MSE_KF_dB_avg:.6f} dB")
-    print("KF MSE by Dimension:")
-    dimensions = ['Position', 'Velocity', 'Acceleration']
-    for dim_idx in range(min(3, SysModel.m)):
-        dim_name = dimensions[dim_idx]
-        print(f"  {dim_name}: {MSE_KF_dB_avg_by_dim[dim_idx]:.6f} dB")
-    
-    # Print Run Time
-    print("Inference Time:", t)
+    if change_happened:
+        print(f"KF MSE ({'All States' if allStates else 'Position Only'}): {MSE_KF_dB_avg:.6f} dB")
+        print("KF MSE by Dimension:")
+        dimensions = ['Position', 'Velocity', 'Acceleration']
+        for dim_idx in range(min(3, SysModel.m)):
+            dim_name = dimensions[dim_idx]
+            print(f"  {dim_name}: {MSE_KF_dB_avg_by_dim[dim_idx]:.6f} dB")
+        
+        # Print Run Time
+        print("Inference Time:", t)
+    else:
+        print(f"Partial KF MSE ({'All States' if allStates else 'Position Only'}): {MSE_KF_dB_avg:.6f} dB")
+        print("Partial KF MSE by Dimension:")
+        dimensions = ['Position', 'Velocity', 'Acceleration']
+        for dim_idx in range(min(3, SysModel.m)):
+            dim_name = dimensions[dim_idx]
+            print(f"  {dim_name}: {MSE_KF_dB_avg_by_dim[dim_idx]:.6f} dB")
+        
+        # Print Run Time
+        print("Partial KFInference Time:", t)
     
     # Return results - include both overall and dimension-wise results
     detailed_results = {

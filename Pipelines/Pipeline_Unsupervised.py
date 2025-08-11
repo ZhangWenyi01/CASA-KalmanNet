@@ -89,6 +89,11 @@ class Pipeline_Unsupervised:
         unsupervised_model.train()      # Continuous online learning
         unsupervised_model.batch_size = 1
         
+        # Ensure all three models use the provided (possibly mismatched) system dynamics
+        self.KNetmodel.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+        original_model.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+        unsupervised_model.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+        
         # Initialize optimizers once
         self.optimizer_original = torch.optim.Adam(original_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
         self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
@@ -204,7 +209,7 @@ class Pipeline_Unsupervised:
                     for param_group in self.optimizer_original.param_groups:
                         param_group['lr'] = new_lr
 
-                    if cpd_out_tmp > 0.8:
+                    if cpd_out_tmp > 0.5:
                         LOSS_original = self.loss_fn(y_out_original,observation)
                         self.optimizer_original.zero_grad()
                         LOSS_original.backward()
