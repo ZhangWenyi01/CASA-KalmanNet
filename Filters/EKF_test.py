@@ -5,7 +5,25 @@ from Filters.EKF import ExtendedKalmanFilter
 
 
 def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
-     randomInit = False,test_init=None, test_lengthMask=None):
+     randomInit = False,test_init=None, test_lengthMask=None,
+     changepoint = None, changeparameters: dict = None):
+    
+    # Check changepoint parameters
+    if (changepoint is None and changeparameters is not None) or (changepoint is not None and changeparameters is None):
+        raise ValueError("changepoint and changeparameters must be provided together or not at all")
+    elif (changepoint is not None and changeparameters is not None):
+        change_happened = True
+    else:
+        change_happened = False
+    
+    # Extract change point parameters
+    if change_happened:
+        Q_after = changeparameters['Q']
+        R_after = changeparameters['R']
+        F_after = changeparameters['F']
+        H_after = changeparameters['H']
+        changed_param = changeparameters['changed_param']
+    
     # Number of test samples
     N_T = test_target.size()[0]
     # LOSS
@@ -23,18 +41,45 @@ def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
 
     start = time.time()
     EKF = ExtendedKalmanFilter(SysModel, args)
+    
     # Init and Forward Computation   
     if(randomInit):
         EKF.Init_batched_sequence(test_init, SysModel.m2x_0.view(1,SysModel.m,SysModel.m).expand(N_T,-1,-1))        
     else:
         EKF.Init_batched_sequence(SysModel.m1x_0.view(1,SysModel.m,1).expand(N_T,-1,-1), SysModel.m2x_0.view(1,SysModel.m,SysModel.m).expand(N_T,-1,-1))           
-    EKF.GenerateBatch(test_input)
+    
+    # Handle changepoint processing
+    if change_happened:
+        # Process data before changepoint
+        EKF.GenerateBatch(test_input[:, :, :changepoint])
+        X_before = EKF.x
+        
+        # Save state and covariance at change point to ensure continuity
+        final_state = EKF.m1x_posterior.clone()
+        final_covariance = EKF.m2x_posterior.clone()
+        
+        # Update parameters at change point
+        if changed_param == 'Q':
+            EKF.Q = Q_after.to(EKF.device)
+        elif changed_param == 'R':
+            EKF.R = R_after.to(EKF.device)
+        
+        # Re-initialize EKF using state at change point as new initial condition
+        EKF.Init_batched_sequence(final_state, final_covariance)
+        
+        # Continue processing data after change point
+        EKF.GenerateBatch(test_input[:, :, changepoint:])
+        EKF_out = torch.cat([X_before, EKF.x], dim=2)
+        
+        # Note: KG_array from second part will overwrite, this is acceptable for EKF
+        KG_array = EKF.KG_array
+    else:
+        EKF.GenerateBatch(test_input)
+        EKF_out = EKF.x
+        KG_array = EKF.KG_array
      
     end = time.time()
     t = end - start
-
-    KG_array = EKF.KG_array
-    EKF_out = EKF.x
 
     # MSE loss
     for j in range(N_T):# cannot use batch due to different length and std computation   
@@ -63,6 +108,6 @@ def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
     # Print Run Time
     print("Inference Time:", t)
 
-    # return [MSE_EKF_linear_arr, MSE_EKF_linear_avg, MSE_EKF_dB_avg, KG_array, EKF_out]
+    return [MSE_EKF_linear_arr, MSE_EKF_linear_avg, MSE_EKF_dB_avg, KG_array, EKF_out]
 
 

@@ -381,57 +381,62 @@ class Pipeline_Unsupervised:
         
 
         ###############################
-        ### Training Sequence Batch ###
+        ### Initialize models and optimizers (align with Unsupervised_CPD_Online) ###
         ###############################
-        self.optimizer.zero_grad()
-        # KNet Training Mode
-        self.KNetmodel.train()
+        # Baseline model: inference only, no training
+        self.KNetmodel.eval()
         self.KNetmodel.batch_size = 1
-        # CPDNet Test Mode
+        # CPDNet: detection model, inference only
         self.CPDmodel.eval()
         self.CPDmodel.batch_size = 1
-        # Init Hidden State
-        self.KNetmodel.init_hidden_KNet()
-        # Allocate estimate array
+
+        # Create independent copies for CPD-triggered training and continuous self-supervised training
+        original_model = copy.deepcopy(self.KNetmodel)
+        original_model.train()
+        original_model.batch_size = 1
+
+        unsupervised_model = copy.deepcopy(self.KNetmodel)
+        unsupervised_model.train()
+        unsupervised_model.batch_size = 1
+
+        # Ensure all three models use the provided system dynamics (consistent with Unsupervised_CPD_Online)
+        self.KNetmodel.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+        original_model.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+        unsupervised_model.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
+
+        # Create separate optimizers for the two trainable branches
+        self.optimizer_original = torch.optim.Adam(original_model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
+        self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
+
+        # Result buffers (same shapes as in Unsupervised_CPD_Online)
         self.observation_predictions = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_predictions = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
         self.observation_original = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_original = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
         self.observation_unsupervised = torch.empty((self.N_T, self.ssModel.n, SysModel.T))
         self.state_unsupervised = torch.empty((self.N_T, self.ssModel.m, SysModel.T))
-
-        # Copy to restore the NN to its original state for each trajectory
-        original_model = copy.deepcopy(self.KNetmodel)
-        original_model.eval()
-        original_model.batch_size = 1
-        original_model.init_hidden_KNet()
         
-        unsupervised_model = copy.deepcopy(self.KNetmodel)
-        unsupervised_model.train()
-        unsupervised_model.batch_size = 1
-        unsupervised_model.init_hidden_KNet()
-        self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=1e-3, weight_decay=self.weightDecay)
+        # MSE storage arrays for final averaging
+        self.MSE_CPD_linear_arr = torch.empty((self.N_T,))
+        self.MSE_Original_KNet_linear_arr = torch.empty((self.N_T,))
+        self.MSE_Unsupervised_linear_arr = torch.empty((self.N_T,))
         
         # Start looping over trajectories
         for trajectorie in range(self.N_T):
             print('Trajectory: ', trajectorie + 1, '/', self.N_T)
 
-            ###############################
-            ### Training Sequence Batch ###
-            ###############################
-            self.reTraining = False
-            # Reset optimizer
-            self.ResetOptimizer()
-            # Training Mode
-            self.KNetmodel.train()
-
             # Load the next trajectory
             y_training = torch.unsqueeze(y_observation[trajectorie, :, :],0).requires_grad_(True).to(self.device)
 
             # Initialize state
-            self.KNetmodel.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
-            original_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
-            unsupervised_model.InitSequence(torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device),self.args.T)
+            init_state = torch.unsqueeze(train_init[trajectorie,:,:],0).to(self.device)
+            self.KNetmodel.InitSequence(init_state, self.args.T)
+            original_model.InitSequence(init_state, self.args.T)
+            unsupervised_model.InitSequence(init_state, self.args.T)
+            # Init hidden
+            self.KNetmodel.init_hidden_KNet()
+            original_model.init_hidden_KNet()
+            unsupervised_model.init_hidden_KNet()
             # Calculate the number of strides required
             number_of_stride = int(self.ssModel.T / self.stride)
             
@@ -451,25 +456,21 @@ class Pipeline_Unsupervised:
                 
                 x_out_unsupervised = torch.empty(1, self.ssModel.m, self.stride).to(self.device)
                 y_out_unsupervised = torch.zeros(1, self.ssModel.n, self.stride).to(self.device)
-                # Initialize training mode
-                self.KNetmodel.train()
-                original_model.eval()
-                unsupervised_model.train()
-                # Initialize the informations
-                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.clone().detach(),SysModel.T)
-                original_model.InitSequence(original_model.m1x_posterior.clone().detach(),SysModel.T)
-                unsupervised_model.InitSequence(unsupervised_model.m1x_posterior.clone().detach(),SysModel.T)
+                # Consistent with Unsupervised_CPD_Online: use previous window posterior as next window initial state
+                self.KNetmodel.InitSequence(self.KNetmodel.m1x_posterior.clone().detach(), SysModel.T)
+                original_model.InitSequence(original_model.m1x_posterior.clone().detach(), SysModel.T)
+                unsupervised_model.InitSequence(unsupervised_model.m1x_posterior.clone().detach(), SysModel.T)
                 self.KNetmodel.init_hidden_KNet()
                 original_model.init_hidden_KNet()
                 unsupervised_model.init_hidden_KNet()
 
-                # Start training
+                # Forward pass (baseline not trained; other two branches will be trained)
                 for i in range(self.stride):
-                    x_out_online[:, :, i] = torch.squeeze(self.KNetmodel(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_online[:, :, i] = torch.squeeze(self.KNetmodel(torch.unsqueeze(observation[:, :, i], dim=2)))
                     y_out_online[:, :, i] = torch.squeeze(self.KNetmodel.m1y)
-                    x_out_original[:, :, i] = torch.squeeze(original_model(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_original[:, :, i] = torch.squeeze(original_model(torch.unsqueeze(observation[:, :, i], dim=2)))
                     y_out_original[:, :, i] = torch.squeeze(original_model.m1y)
-                    x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(torch.unsqueeze(observation[:, :, i],dim=2)))
+                    x_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model(torch.unsqueeze(observation[:, :, i], dim=2)))
                     y_out_unsupervised[:, :, i] = torch.squeeze(unsupervised_model.m1y)
 
                 self.observation_predictions[trajectorie, :,
@@ -485,22 +486,24 @@ class Pipeline_Unsupervised:
                 self.state_unsupervised[trajectorie, :,
                 (stride * self.stride):(stride * self.stride + self.stride)] = x_out_unsupervised.detach()
                 
-                if stride >0:
+                if stride > 0:
                     for t in range(self.stride):
                         cpd_input[:, :, (stride-1)*self.stride+t] = cpd_dataset_process_lor(torch.unsqueeze(self.observation_predictions[trajectorie, :,(stride * self.stride-self.stride+t):(stride * self.stride+t)],dim=0).to(self.device),
                                                                     y_training[:, :, (stride * self.stride-self.stride+t):(stride * self.stride+t)])
                     cpd_out_tmp = self.CPDmodel(cpd_input[:, :, (stride-1)*self.stride:(stride-1)*self.stride+self.stride])
-                    new_lr = (3*cpd_out_tmp*self.learningRate).item()
-                    for param_group in self.optimizer.param_groups:
+                    new_lr = (3 * cpd_out_tmp * self.learningRate).item()
+                    for param_group in self.optimizer_original.param_groups:
                         param_group['lr'] = new_lr
 
+                # Supervised branch training triggered by CPD
+                if stride > 0 and (cpd_out_tmp > 0.5):
+                    LOSS_original = self.loss_fn(y_out_original, observation)
+                    self.optimizer_original.zero_grad()
+                    LOSS_original.backward()
+                    self.optimizer_original.step()
 
-                LOSS = self.loss_fn(y_out_online,observation)
-                self.optimizer.zero_grad()
-                LOSS.backward()
-                self.optimizer.step()
-                
-                LOSS_unsupervised = self.loss_fn(y_out_unsupervised,observation)
+                # Continuous self-supervised branch training
+                LOSS_unsupervised = self.loss_fn(y_out_unsupervised, observation)
                 self.optimizer_unsupervised.zero_grad()
                 LOSS_unsupervised.backward()
                 self.optimizer_unsupervised.step()
@@ -511,81 +514,68 @@ class Pipeline_Unsupervised:
                 #     print('Training itt:', stride + 1, '/', number_of_stride, ',OBS MSE:',
                 #           10 * torch.log10(LOSS).item(), '[dB]')
                     
-                del LOSS,y_out_online,observation,LOSS_unsupervised
-            # Reset the optimizer for the next trajectory
-            self.ResetOptimizer()
-            self.optimizer_unsupervised = torch.optim.Adam(unsupervised_model.parameters(), lr=2e-3, weight_decay=self.weightDecay)
-        
+                del y_out_online, observation, LOSS_unsupervised
             
+            # Calculate MSE for this trajectory and store for later averaging
             loss_fn = torch.nn.MSELoss(reduction='mean')
-            MSE_Original_Linear = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_Original_dB = 10 * torch.log10(MSE_Original_Linear)
-            MSE_CPDUnsupervised_Linear = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_CPDUnsupervised_dB = 10 * torch.log10(MSE_CPDUnsupervised_Linear)
-            MSE_Unsupervised_Linear = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach())
-            MSE_Unsupervised_dB = 10 * torch.log10(MSE_Unsupervised_Linear)
-            print('MSE Original:', MSE_Original_dB.item(), '[dB]')
-            print('MSE CPDUnsupervised:', MSE_CPDUnsupervised_dB.item(), '[dB]')
-            print('MSE Unsupervised:', MSE_Unsupervised_dB.item(), '[dB]')
-            # Create tensorboard writer
-            
-            
-            # # Log MSE values for each time step
-            # writer.add_scalars('MSE Comparison', {
-            #     'Original MSE': MSE_Original_dB.mean().item(),
-            #     'CPDUnsupervised MSE': MSE_CPDUnsupervised_dB.mean().item(),
-            #     'Unsupervised MSE': MSE_Unsupervised_dB.mean().item()
-            # }, trajectorie)
-            
-            # writer.close()
-            
-            
-            # Create a figure with 3 subplots
-            fig = plt.figure(figsize=(15, 5))
-            
-            # Online trajectory subplot
-            ax1 = fig.add_subplot(131, projection='3d')
-            ax1.plot(self.state_predictions[trajectorie, 0, :].cpu().detach().numpy(),
-                    self.state_predictions[trajectorie, 1, :].cpu().detach().numpy(),
-                    self.state_predictions[trajectorie, 2, :].cpu().detach().numpy(),
-                    label='y_out_online')
-            ax1.set_title('Online Trajectory')
-            ax1.set_xlabel('X')
-            ax1.set_ylabel('Y')
-            ax1.set_zlabel('Z')
-            ax1.legend()
-            
-            # Original trajectory subplot
-            ax2 = fig.add_subplot(132, projection='3d')
-            ax2.plot(self.state_original[trajectorie, 0, :].cpu().detach().numpy(),
-                    self.state_original[trajectorie, 1, :].cpu().detach().numpy(),
-                    self.state_original[trajectorie, 2, :].cpu().detach().numpy(),
-                    label='y_out_original')
-            ax2.set_title('Original Trajectory')
-            ax2.set_xlabel('X')
-            ax2.set_ylabel('Y')
-            ax2.set_zlabel('Z')
-            ax2.legend()
-            
-            # True trajectory subplot
-            ax3 = fig.add_subplot(133, projection='3d')
-            ax3.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(),
-                    x_true[trajectorie, 1, :].cpu().detach().numpy(),
-                    x_true[trajectorie, 2, :].cpu().detach().numpy(),
-                    label='x_true')
-            ax3.set_title('True Trajectory')
-            ax3.set_xlabel('X')
-            ax3.set_ylabel('Y')
-            ax3.set_zlabel('Z')
-            ax3.legend()
-            
-            plt.tight_layout()
-            plt.show()
+            self.MSE_CPD_linear_arr[trajectorie] = loss_fn(self.state_original[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            self.MSE_Original_KNet_linear_arr[trajectorie] = loss_fn(self.state_predictions[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+            self.MSE_Unsupervised_linear_arr[trajectorie] = loss_fn(self.state_unsupervised[trajectorie,:,:].cpu().detach(), x_true[trajectorie,:,:].cpu().detach()).item()
+        
+        # Calculate average MSE across all trajectories (following lines 298-299 pattern)
+        MSE_CPD_linear_avg = torch.mean(self.MSE_CPD_linear_arr)
+        MSE_CPD_dB_avg = 10 * torch.log10(MSE_CPD_linear_avg)
+        MSE_Original_KNet_linear_avg = torch.mean(self.MSE_Original_KNet_linear_arr)
+        MSE_Original_KNet_dB_avg = 10 * torch.log10(MSE_Original_KNet_linear_avg)
+        MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr)
+        MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
+        
+        # Print average MSE results
+        print('Average MSE CPDUnsupervised:', MSE_CPD_dB_avg.item(), '[dB]')
+        print('Average MSE Original KNet:', MSE_Original_KNet_dB_avg.item(), '[dB]')
+        print('Average MSE Unsupervised:', MSE_Unsupervised_dB_avg.item(), '[dB]')
+        
+        # Randomly select one trajectory for plotting
+        selected_traj = random.randint(0, self.N_T - 1)
+        print(f'Plotting trajectory {selected_traj + 1}/{self.N_T}')
+        
+        # Create a single 3D subplot showing Original (baseline), Ours (CPD-triggered), and True trajectories
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        # Original (baseline, no updates)
+        ax.plot(self.state_predictions[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_predictions[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_predictions[selected_traj, 2, :].cpu().detach().numpy(),
+                label='original KNet')
+        # Ours (CPD-triggered branch)
+        ax.plot(self.state_original[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_original[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_original[selected_traj, 2, :].cpu().detach().numpy(),
+                label='ours')
+        # Unsupervised
+        ax.plot(self.state_unsupervised[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_unsupervised[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_unsupervised[selected_traj, 2, :].cpu().detach().numpy(),
+                label='unsupervised')
+        # True
+        ax.plot(x_true[selected_traj, 0, :].cpu().detach().numpy(),
+                x_true[selected_traj, 1, :].cpu().detach().numpy(),
+                x_true[selected_traj, 2, :].cpu().detach().numpy(),
+                label='x_true')
+        ax.set_title(f'3D Trajectories (Trajectory {selected_traj + 1}): Original vs Ours vs Unsupervised vs True')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Z')
+        ax.legend()
+        
+        plt.tight_layout()
+        plt.show()
 
-            # # X-axis comparison
+
+            # # X-axis comparison (unsupervised vs online vs true)
             # fig_x = plt.figure(figsize=(12, 4))
             # plt.plot(self.state_predictions[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_original[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_original')
+            # plt.plot(self.state_unsupervised[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_unsupervised')
             # plt.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(), label='x_true')
             # plt.title('X-axis Comparison')
             # plt.xlabel('Time')
@@ -593,10 +583,10 @@ class Pipeline_Unsupervised:
             # plt.legend()
             # plt.show()
 
-            # # Y-axis comparison
+            # # Y-axis comparison (unsupervised vs online vs true)
             # fig_y = plt.figure(figsize=(12, 4))
             # plt.plot(self.state_predictions[trajectorie, 1, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_original[trajectorie, 1, :].cpu().detach().numpy(), label='y_out_original')
+            # plt.plot(self.state_unsupervised[trajectorie, 1, :].cpu().detach().numpy(), label='y_out_unsupervised')
             # plt.plot(x_true[trajectorie, 1, :].cpu().detach().numpy(), label='x_true')
             # plt.title('Y-axis Comparison')
             # plt.xlabel('Time')
@@ -604,10 +594,10 @@ class Pipeline_Unsupervised:
             # plt.legend()
             # plt.show()
 
-            # # Z-axis comparison
+            # # Z-axis comparison (unsupervised vs online vs true)
             # fig_z = plt.figure(figsize=(12, 4))
             # plt.plot(self.state_predictions[trajectorie, 2, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_original[trajectorie, 2, :].cpu().detach().numpy(), label='y_out_original')
+            # plt.plot(self.state_unsupervised[trajectorie, 2, :].cpu().detach().numpy(), label='y_out_unsupervised')
             # plt.plot(x_true[trajectorie, 2, :].cpu().detach().numpy(), label='x_true')
             # plt.title('Z-axis Comparison')
             # plt.xlabel('Time')

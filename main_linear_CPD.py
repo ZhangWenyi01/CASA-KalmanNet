@@ -40,8 +40,8 @@ path_results_CPD = 'CPDNet/'
 # Change Point setting
 change_point_params = {
    'changed_param':'Q',
-    'Q': 50*Q_gen,
-    'R': 'grad',
+    'Q': 2000*Q_gen,
+    'R': 2*R_onlyPos,
     'F': F_rotated,
     'H': H_onlyPos_rotated
 }
@@ -258,7 +258,8 @@ sys_model_online = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.
 sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
 sys_model_KF = SystemModel(F_gen, Q_gen, H_onlyPos, R_onlyPos, args.T, args.T_test)
 sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
-sys_model_partial = SystemModel(F_gen, Q_gen*1000000, H_onlyPos, R_onlyPos*0.01, args.T, args.T_test)
+# sys_model_partial = SystemModel(F_gen, Q_gen*1000000, H_onlyPos, R_onlyPos*0.01, args.T, args.T_test)
+sys_model_partial = SystemModel(F_gen, Q_gen, H_onlyPos_rotated, R_onlyPos, args.T, args.T_test)
 sys_model_partial.InitSequence(m1x_0, m2x_0)# x0 and P0
 
 unsupervised_pipeline = Pipeline_Unsupervised()
@@ -297,128 +298,128 @@ emkf_position_mse_array = []
 emkf_full_state_mse_array = []
 emkf_detailed_results = [] # New list to store detailed results
 
-for traj_idx in range(args.N_T):
+# for traj_idx in range(args.N_T):
     
-    current_input = test_input_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 1)
-    current_target = test_target_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 3)
-    current_init = test_init_CPD[traj_idx, :, 0].cpu().numpy()  # Get true initial state
+#     current_input = test_input_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 1)
+#     current_target = test_target_CPD[traj_idx, :, :].T.cpu().numpy()  # (100, 3)
+#     current_init = test_init_CPD[traj_idx, :, 0].cpu().numpy()  # Get true initial state
     
-    # Prepare EMKF parameters based on selected mode
-    if EMKF_FULL_INFO:
-        # Full Information mode: Use change_point_params (true generative parameters)
-        changed_param = change_point_params.get('changed_param', 'Q')
+#     # Prepare EMKF parameters based on selected mode
+#     if EMKF_FULL_INFO:
+#         # Full Information mode: Use change_point_params (true generative parameters)
+#         changed_param = change_point_params.get('changed_param', 'Q')
         
-        # Initialize with original generative parameters
-        F_for_emkf = F_gen
-        H_for_emkf = H_onlyPos
-        R_for_emkf = R_onlyPos
-        Q_init_emkf = Q_gen
+#         # Initialize with original generative parameters
+#         F_for_emkf = F_gen
+#         H_for_emkf = H_onlyPos
+#         R_for_emkf = R_onlyPos
+#         Q_init_emkf = Q_gen
         
-        # Only override the parameter that is marked for change
-        if changed_param == 'F':
-            F_for_emkf = change_point_params.get('F', F_gen)
-        elif changed_param == 'H':
-            H_for_emkf = change_point_params.get('H', H_onlyPos)
-        elif changed_param == 'Q':
-            Q_init_emkf = change_point_params.get('Q', Q_gen)
-        elif changed_param == 'R':
-            R_for_emkf = change_point_params.get('R', R_onlyPos)
+#         # Only override the parameter that is marked for change
+#         if changed_param == 'F':
+#             F_for_emkf = change_point_params.get('F', F_gen)
+#         elif changed_param == 'H':
+#             H_for_emkf = change_point_params.get('H', H_onlyPos)
+#         elif changed_param == 'Q':
+#             Q_init_emkf = change_point_params.get('Q', Q_gen)
+#         elif changed_param == 'R':
+#             R_for_emkf = change_point_params.get('R', R_onlyPos)
         
-        # Handle string values (like 'grad') by falling back to generative defaults
-        if isinstance(F_for_emkf, str):
-            F_for_emkf = F_gen
-        if isinstance(H_for_emkf, str):
-            H_for_emkf = H_onlyPos
-        if isinstance(R_for_emkf, str):
-            R_for_emkf = R_onlyPos
-        if isinstance(Q_init_emkf, str):
-            Q_init_emkf = Q_gen
+#         # Handle string values (like 'grad') by falling back to generative defaults
+#         if isinstance(F_for_emkf, str):
+#             F_for_emkf = F_gen
+#         if isinstance(H_for_emkf, str):
+#             H_for_emkf = H_onlyPos
+#         if isinstance(R_for_emkf, str):
+#             R_for_emkf = R_onlyPos
+#         if isinstance(Q_init_emkf, str):
+#             Q_init_emkf = Q_gen
             
-    else:
-        # Partial Information mode: Use sys_model_partial (mismatched parameters, same as KF test)
-        F_for_emkf = sys_model_partial.F
-        H_for_emkf = sys_model_partial.H
-        R_for_emkf = sys_model_partial.R
-        Q_init_emkf = sys_model_partial.Q
+#     else:
+#         # Partial Information mode: Use sys_model_partial (mismatched parameters, same as KF test)
+#         F_for_emkf = sys_model_partial.F
+#         H_for_emkf = sys_model_partial.H
+#         R_for_emkf = sys_model_partial.R
+#         Q_init_emkf = sys_model_partial.Q
 
-    # Use more reasonable window parameters
-    sliding_results = sliding_window_EMKF(
-        observations=current_input,
-        true_states=current_target,
-        F_true=F_for_emkf.cpu().numpy(),
-        H_true=H_for_emkf.cpu().numpy(),
-        R_true=R_for_emkf.cpu().numpy(),
-        Q_initial=Q_init_emkf.cpu().numpy(),
-        window_size=50,
-        overlap=15,
-        verbose=False,
-        true_init_state=current_init,
-        allStates=True,
-        init_covariance=m2x_0.cpu().numpy()
-    )
+#     # Use more reasonable window parameters
+#     sliding_results = sliding_window_EMKF(
+#         observations=current_input,
+#         true_states=current_target,
+#         F_true=F_for_emkf.cpu().numpy(),
+#         H_true=H_for_emkf.cpu().numpy(),
+#         R_true=R_for_emkf.cpu().numpy(),
+#         Q_initial=Q_init_emkf.cpu().numpy(),
+#         window_size=50,
+#         overlap=15,
+#         verbose=False,
+#         true_init_state=current_init,
+#         allStates=True,
+#         init_covariance=m2x_0.cpu().numpy()
+#     )
     
-    if sliding_results['filtered_states'] is not None:
-        # Store linear MSE values (not dB) for proper averaging
-        emkf_position_mse_array.append(sliding_results['position_mse_linear'])  # Store linear values for correct averaging
-        emkf_full_state_mse_array.append(sliding_results['full_state_mse_linear'])  # Store linear values for correct averaging
-        emkf_mse_array.append(sliding_results['mse_loss'])
+#     if sliding_results['filtered_states'] is not None:
+#         # Store linear MSE values (not dB) for proper averaging
+#         emkf_position_mse_array.append(sliding_results['position_mse_linear'])  # Store linear values for correct averaging
+#         emkf_full_state_mse_array.append(sliding_results['full_state_mse_linear'])  # Store linear values for correct averaging
+#         emkf_mse_array.append(sliding_results['mse_loss'])
         
-        # Store detailed MSE results for dimension-wise analysis
-        emkf_detailed_results.append(sliding_results['detailed_mse'])
-    else:
-        emkf_mse_array.append(float('inf'))
-        emkf_position_mse_array.append(float('inf'))
-        emkf_full_state_mse_array.append(float('inf'))
-        emkf_detailed_results.append({
-            'MSE_position_dB': float('inf'),
-            'MSE_velocity_dB': float('inf'),
-            'MSE_acceleration_dB': float('inf'),
-            'mse_position_linear': float('inf'),
-            'mse_velocity_linear': float('inf'),
-            'mse_acceleration_linear': float('inf')
-        })
+#         # Store detailed MSE results for dimension-wise analysis
+#         emkf_detailed_results.append(sliding_results['detailed_mse'])
+#     else:
+#         emkf_mse_array.append(float('inf'))
+#         emkf_position_mse_array.append(float('inf'))
+#         emkf_full_state_mse_array.append(float('inf'))
+#         emkf_detailed_results.append({
+#             'MSE_position_dB': float('inf'),
+#             'MSE_velocity_dB': float('inf'),
+#             'MSE_acceleration_dB': float('inf'),
+#             'mse_position_linear': float('inf'),
+#             'mse_velocity_linear': float('inf'),
+#             'mse_acceleration_linear': float('inf')
+#         })
 
-# Calculate EMKF average performance with dimension-wise output (following KF test logic)
-if emkf_mse_array:
-    valid_results = [x for x in emkf_mse_array if x != float('inf')]
-    if valid_results:
-        # Get valid detailed results
-        valid_detailed = [x for x in emkf_detailed_results if x['mse_position_linear'] != float('inf')]
+# # Calculate EMKF average performance with dimension-wise output (following KF test logic)
+# if emkf_mse_array:
+#     valid_results = [x for x in emkf_mse_array if x != float('inf')]
+#     if valid_results:
+#         # Get valid detailed results
+#         valid_detailed = [x for x in emkf_detailed_results if x['mse_position_linear'] != float('inf')]
         
-        if valid_detailed:
-            # Calculate dimension-wise statistics using linear MSE averaging (consistent with KF test)
-            position_linear_results = [x['mse_position_linear'] for x in valid_detailed]
-            velocity_linear_results = [x['mse_velocity_linear'] for x in valid_detailed if x['mse_velocity_linear'] is not None and x['mse_velocity_linear'] != float('inf')]
-            acceleration_linear_results = [x['mse_acceleration_linear'] for x in valid_detailed if x['mse_acceleration_linear'] is not None and x['mse_acceleration_linear'] != float('inf')]
+#         if valid_detailed:
+#             # Calculate dimension-wise statistics using linear MSE averaging (consistent with KF test)
+#             position_linear_results = [x['mse_position_linear'] for x in valid_detailed]
+#             velocity_linear_results = [x['mse_velocity_linear'] for x in valid_detailed if x['mse_velocity_linear'] is not None and x['mse_velocity_linear'] != float('inf')]
+#             acceleration_linear_results = [x['mse_acceleration_linear'] for x in valid_detailed if x['mse_acceleration_linear'] is not None and x['mse_acceleration_linear'] != float('inf')]
             
-            # Calculate averages and convert to dB (following KF test and Pipeline_Unsupervised logic)
-            position_avg_linear = np.mean(position_linear_results)
-            position_avg_dB = 10 * np.log10(position_avg_linear)
+#             # Calculate averages and convert to dB (following KF test and Pipeline_Unsupervised logic)
+#             position_avg_linear = np.mean(position_linear_results)
+#             position_avg_dB = 10 * np.log10(position_avg_linear)
             
-            # Calculate overall MSE from linear values
-            position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
-            full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
+#             # Calculate overall MSE from linear values
+#             position_valid = [x for x in emkf_position_mse_array if x != float('inf')]
+#             full_state_valid = [x for x in emkf_full_state_mse_array if x != float('inf')]
             
-            print("EMKF Results:")
-            if full_state_valid:
-                full_state_avg_linear = np.mean(full_state_valid)
-                full_state_avg_dB = 10 * np.log10(full_state_avg_linear)
-                print(f"  Overall MSE: {full_state_avg_dB:.6f} dB")
+#             print("EMKF Results:")
+#             if full_state_valid:
+#                 full_state_avg_linear = np.mean(full_state_valid)
+#                 full_state_avg_dB = 10 * np.log10(full_state_avg_linear)
+#                 print(f"  Overall MSE: {full_state_avg_dB:.6f} dB")
             
-            print("EMKF MSE by Dimension:")
-            print(f"  Position: {position_avg_dB:.6f} dB")
-            if velocity_linear_results:
-                velocity_avg_linear = np.mean(velocity_linear_results)
-                velocity_avg_dB = 10 * np.log10(velocity_avg_linear)
-                print(f"  Velocity: {velocity_avg_dB:.6f} dB")
-            if acceleration_linear_results:
-                acceleration_avg_linear = np.mean(acceleration_linear_results)
-                acceleration_avg_dB = 10 * np.log10(acceleration_avg_linear)
-                print(f"  Acceleration: {acceleration_avg_dB:.6f} dB")
-        else:
-            print(f"EMKF: All trajectories failed")
-    else:
-        print(f"EMKF: All trajectories failed")
-else:
-    print(f"EMKF: No results")
+#             print("EMKF MSE by Dimension:")
+#             print(f"  Position: {position_avg_dB:.6f} dB")
+#             if velocity_linear_results:
+#                 velocity_avg_linear = np.mean(velocity_linear_results)
+#                 velocity_avg_dB = 10 * np.log10(velocity_avg_linear)
+#                 print(f"  Velocity: {velocity_avg_dB:.6f} dB")
+#             if acceleration_linear_results:
+#                 acceleration_avg_linear = np.mean(acceleration_linear_results)
+#                 acceleration_avg_dB = 10 * np.log10(acceleration_avg_linear)
+#                 print(f"  Acceleration: {acceleration_avg_dB:.6f} dB")
+#         else:
+#             print(f"EMKF: All trajectories failed")
+#     else:
+#         print(f"EMKF: All trajectories failed")
+# else:
+#     print(f"EMKF: No results")
     

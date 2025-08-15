@@ -53,6 +53,6 @@ class CPDNetNN(nn.Module):
         # Apply activation
         out = self.activation(out)
 
-        # Add sigmoid activation to ensure output values are between 0 and 1
+        # Add activation to ensure output values are between 0 and 1
         out = torch.tanh(out)
         return out[:, -1, :]

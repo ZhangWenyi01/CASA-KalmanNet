@@ -25,7 +25,7 @@ F_CV = torch.tensor([[1, delta_t_gen],
                      [0,           1]]).float()      
 
 # Set rotation angle (in radians), e.g., 30 degrees
-theta = torch.tensor(30.0) * torch.pi / 180  # Convert 30 degrees to radians
+theta = torch.tensor(10.0) * torch.pi / 180  # Convert 30 degrees to radians
 
 # Build 2D rotation matrix for the given angle (rotate all components)
 # Here we assume rotation around z-axis, so z component remains unchanged, but x and y components rotate
@@ -51,7 +51,7 @@ H_onlyPos_rotated = H_onlyPos @ rotation_matrix.T
 ###############################################
 # Noise Parameters
 v = 0 # dB
-gamma = -5
+gamma = -7.5
 linear_factor = 10 ** (gamma / 10)
 r2 = torch.tensor([1/linear_factor]).float()
 q2 = r2*10 ** (v / 10)

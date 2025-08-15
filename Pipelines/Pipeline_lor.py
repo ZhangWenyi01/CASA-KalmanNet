@@ -279,74 +279,74 @@ class Pipeline_EKF:
         x_out_test_3d = x_out_test[random_batch_index, :, :].cpu().detach().numpy()
         test_target_3d = test_target[random_batch_index, :, :].cpu().detach().numpy()
 
-        # Create a single 3D plot
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection='3d')
+        # # Create a single 3D plot
+        # fig = plt.figure(figsize=(8, 6))
+        # ax = fig.add_subplot(111, projection='3d')
 
-        # Plot x_out_test 3D trajectory
-        ax.plot(x_out_test_3d[0, :], x_out_test_3d[1, :], x_out_test_3d[2, :], label='x_out_test', color='red')
+        # # Plot x_out_test 3D trajectory
+        # ax.plot(x_out_test_3d[0, :], x_out_test_3d[1, :], x_out_test_3d[2, :], label='x_out_test', color='red')
 
-        # Plot test_target 3D trajectory
-        ax.plot(test_target_3d[0, :], test_target_3d[1, :], test_target_3d[2, :], label='test_target', color='blue')
+        # # Plot test_target 3D trajectory
+        # ax.plot(test_target_3d[0, :], test_target_3d[1, :], test_target_3d[2, :], label='test_target', color='blue')
 
-        ax.set_title('3D Trajectory: x_out_test vs test_target')
-        ax.set_xlabel('Dimension 1')
-        ax.set_ylabel('Dimension 2')
-        ax.set_zlabel('Dimension 3')
-        ax.legend()
+        # ax.set_title('3D Trajectory: x_out_test vs test_target')
+        # ax.set_xlabel('Dimension 1')
+        # ax.set_ylabel('Dimension 2')
+        # ax.set_zlabel('Dimension 3')
+        # ax.legend()
 
-        # Show the plots
-        plt.tight_layout()
-        plt.show()
+        # # Show the plots
+        # plt.tight_layout()
+        # plt.show()
         
         
-        # Plot 2D comparison for the first dimension
-        plt.figure(figsize=(8, 6))
+        # # Plot 2D comparison for the first dimension
+        # plt.figure(figsize=(8, 6))
 
-        # Plot x_out_test for the first dimension
-        plt.plot(x_out_test[random_batch_index, 0, :].cpu().detach().numpy(), label='x_out_test', color='red')
+        # # Plot x_out_test for the first dimension
+        # plt.plot(x_out_test[random_batch_index, 0, :].cpu().detach().numpy(), label='x_out_test', color='red')
 
-        # Plot test_target for the first dimension
-        plt.plot(test_target[random_batch_index, 0, :].cpu().detach().numpy(), label='test_target', color='blue')
+        # # Plot test_target for the first dimension
+        # plt.plot(test_target[random_batch_index, 0, :].cpu().detach().numpy(), label='test_target', color='blue')
 
-        plt.title('2D Comparison: x_out_test vs test_target (X Dimension)')
-        plt.xlabel('Time Step')
-        plt.ylabel('Value')
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        # plt.title('2D Comparison: x_out_test vs test_target (X Dimension)')
+        # plt.xlabel('Time Step')
+        # plt.ylabel('Value')
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
         
-        # Plot 2D comparison for the first dimension
-        plt.figure(figsize=(8, 6))
+        # # Plot 2D comparison for the first dimension
+        # plt.figure(figsize=(8, 6))
 
-        # Plot x_out_test for the first dimension
-        plt.plot(x_out_test[random_batch_index, 1, :].cpu().detach().numpy(), label='x_out_test', color='red')
+        # # Plot x_out_test for the first dimension
+        # plt.plot(x_out_test[random_batch_index, 1, :].cpu().detach().numpy(), label='x_out_test', color='red')
 
-        # Plot test_target for the first dimension
-        plt.plot(test_target[random_batch_index, 1, :].cpu().detach().numpy(), label='test_target', color='blue')
+        # # Plot test_target for the first dimension
+        # plt.plot(test_target[random_batch_index, 1, :].cpu().detach().numpy(), label='test_target', color='blue')
 
-        plt.title('2D Comparison: x_out_test vs test_target (Y Dimension)')
-        plt.xlabel('Time Step')
-        plt.ylabel('Value')
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        # plt.title('2D Comparison: x_out_test vs test_target (Y Dimension)')
+        # plt.xlabel('Time Step')
+        # plt.ylabel('Value')
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
         
-        # Plot 2D comparison for the first dimension
-        plt.figure(figsize=(8, 6))
+        # # Plot 2D comparison for the first dimension
+        # plt.figure(figsize=(8, 6))
 
-        # Plot x_out_test for the first dimension
-        plt.plot(x_out_test[random_batch_index, 2, :].cpu().detach().numpy(), label='x_out_test', color='red')
+        # # Plot x_out_test for the first dimension
+        # plt.plot(x_out_test[random_batch_index, 2, :].cpu().detach().numpy(), label='x_out_test', color='red')
 
-        # Plot test_target for the first dimension
-        plt.plot(test_target[random_batch_index, 2, :].cpu().detach().numpy(), label='test_target', color='blue')
+        # # Plot test_target for the first dimension
+        # plt.plot(test_target[random_batch_index, 2, :].cpu().detach().numpy(), label='test_target', color='blue')
 
-        plt.title('2D Comparison: x_out_test vs test_target (Z Dimension)')
-        plt.xlabel('Time Step')
-        plt.ylabel('Value')
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        # plt.title('2D Comparison: x_out_test vs test_target (Z Dimension)')
+        # plt.xlabel('Time Step')
+        # plt.ylabel('Value')
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
         
         
         # Average
