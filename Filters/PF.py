@@ -103,36 +103,37 @@ class ParticleFilter:
         return predicted_particles
     
     def compute_weights(self, particles, observation):
-        """Compute particle weights based on observation likelihood"""
+        """Compute particle weights based on observation likelihood - Vectorized version"""
         batch_size, N_particles, m, _ = particles.shape
         weights = torch.zeros(batch_size, N_particles).to(self.device)
         
+        # Vectorized computation for all particles at once
         for b in range(batch_size):
-            for p in range(N_particles):
-                # Predicted observation - add batch dimension for h function
-                particle_state = particles[b, p, :, :].unsqueeze(0)  # [1, m, 1]
-                h_x = self.h(particle_state)  # [1, n, 1]
-                h_x = h_x.squeeze(0)  # [n, 1]
-                
-                # Compute likelihood
-                if self.n == 1:
-                    diff = observation[b, :, :] - h_x
-                    likelihood = torch.exp(-0.5 * (diff**2 / self.R).sum())
-                else:
-                    diff = observation[b, :, :] - h_x
-                    try:
-                        R_inv = torch.inverse(self.R)
-                        likelihood = torch.exp(-0.5 * torch.mm(torch.mm(diff.T, R_inv), diff).item())
-                    except:
-                        # Fallback to diagonal R
-                        R_diag = torch.diag(self.R).unsqueeze(-1)
-                        likelihood = torch.exp(-0.5 * ((diff**2) / R_diag).sum())
-                
-                weights[b, p] = likelihood
+            # Reshape particles for batch processing: [N_particles, m, 1] -> [N_particles, m, 1]
+            particles_b = particles[b]  # [N_particles, m, 1]
+            
+            # Propagate all particles through observation function at once
+            h_x_batch = self.h(particles_b)  # [N_particles, n, 1]
+            
+            # Compute likelihood for all particles
+            if self.n == 1:
+                diff = observation[b, :, :].expand(N_particles, -1, -1) - h_x_batch
+                likelihood = torch.exp(-0.5 * (diff**2 / self.R).sum(dim=(1, 2)))
+            else:
+                diff = observation[b, :, :].expand(N_particles, -1, -1) - h_x_batch
+                try:
+                    R_inv = torch.inverse(self.R)
+                    # Vectorized likelihood computation
+                    likelihood = torch.exp(-0.5 * torch.sum(diff * torch.mm(diff.squeeze(-1), R_inv), dim=(1, 2)))
+                except:
+                    # Fallback to diagonal R
+                    R_diag = torch.diag(self.R).unsqueeze(-1)
+                    likelihood = torch.exp(-0.5 * ((diff**2) / R_diag).sum(dim=(1, 2)))
+            
+            weights[b] = likelihood
         
         # Normalize weights
-        for b in range(batch_size):
-            weights[b] = weights[b] / (weights[b].sum() + 1e-10)
+        weights = weights / (weights.sum(dim=1, keepdim=True) + 1e-10)
         
         return weights
     

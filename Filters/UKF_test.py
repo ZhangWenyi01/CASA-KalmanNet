@@ -76,8 +76,9 @@ def UKFTest(args, SysModel, test_input, test_target, allStates=True,
         X_before = UKF.x
         
         # Save state and covariance at change point to ensure continuity
-        final_state = UKF.m1x_0_batch.clone()  # Use the last processed state
-        final_covariance = UKF.m2x_0_batch.clone()  # Use the last processed covariance
+        # UKF doesn't store posterior state as attribute, so we need to extract from the last time step
+        final_state = UKF.x[:, :, -1:].clone()  # Last state from before changepoint
+        final_covariance = UKF.m2x_0_batch.clone()  # Use initial covariance as approximation
         
         # Update parameters at change point
         if changed_param == 'Q':
@@ -104,14 +105,14 @@ def UKFTest(args, SysModel, test_input, test_target, allStates=True,
     for j in range(N_T):# cannot use batch due to different length and std computation   
         if(allStates):
             if args.randomLength:
-                MSE_linear_arr[j] = loss_fn(UKF.x[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
+                MSE_linear_arr[j] = loss_fn(UKF_out[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
             else:      
-                MSE_linear_arr[j] = loss_fn(UKF.x[j,:,:], test_target[j,:,:]).item()
+                MSE_linear_arr[j] = loss_fn(UKF_out[j,:,:], test_target[j,:,:]).item()
         else: # mask on state
             if args.randomLength:
-                MSE_linear_arr[j] = loss_fn(UKF.x[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
+                MSE_linear_arr[j] = loss_fn(UKF_out[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
             else:           
-                MSE_linear_arr[j] = loss_fn(UKF.x[j,loc,:], test_target[j,loc,:]).item()
+                MSE_linear_arr[j] = loss_fn(UKF_out[j,loc,:], test_target[j,loc,:]).item()
 
     MSE_linear_avg = torch.mean(MSE_linear_arr)
     MSE_dB_avg = 10 * torch.log10(MSE_linear_avg)

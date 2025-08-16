@@ -41,9 +41,9 @@ print("Current Time =", strTime)
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 10
+args.N_E = 100
 args.N_CV = 100
-args.N_T = 200
+args.N_T = 10
 args.T = 100
 args.T_test = 100
 ### training parameters
@@ -52,6 +52,10 @@ args.n_steps = 20000
 args.n_batch = 30
 args.lr = 1e-4
 args.wd = 1e-3
+
+### PF optimization parameters
+args.pf_particles = 20  # Reduce from 1000 to 200 for faster computation
+args.pf_resample_threshold = 0.3  # Reduce from 0.5 to 0.3 to reduce resampling frequency
 
 if args.use_cuda:
    if torch.cuda.is_available():
@@ -102,7 +106,7 @@ change_point_params = {
 
 # sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n) # original (no CPD)
 sys_model = SystemModel(
-   f, Q, hRotate, R, args.T, args.T_test, m, n,
+   f, Q, h, R, args.T, args.T_test, m, n,
    Q_afterCPD=change_point_params.get('Q', Q),
    f_afterCPD=change_point_params.get('F', f),
    h_afterCPD=change_point_params.get('H', hRotate),
@@ -335,21 +339,11 @@ CPD_Pipeline.setModel(CPDNet_model)
 CPD_Pipeline.setssModel(sys_model_CPD)
 CPD_Pipeline.setTrainingParams(args)
 
-DataGenCPD(args, sys_model_CPD, CPDDatafolderName+CPDDatafileName)
-
-# Load CPD dataset
-loaded_CPD = torch.load(CPDDatafolderName+CPDDatafileName, map_location=device)
-if isinstance(loaded_CPD, (list, tuple)):
-   if len(loaded_CPD) >= 9:
-      [train_input_CPD, train_target_CPD, cv_input_CPD, cv_target_CPD, test_input_CPD, test_target_CPD,train_init_CPD,cv_init_CPD,test_init_CPD] = loaded_CPD[:9]
-      if len(loaded_CPD) == 12:
-         [train_ChangePoint_CPD, cv_ChangePoint_CPD, test_ChangePoint_CPD] = loaded_CPD[9:12]
-      elif len(loaded_CPD) == 15:
-         [train_lengthMask_CPD, cv_lengthMask_CPD, test_lengthMask_CPD, train_ChangePoint_CPD, cv_ChangePoint_CPD, test_ChangePoint_CPD] = loaded_CPD[9:15]
-   else:
-      raise ValueError("Unexpected CPD dataset format: less than 9 elements")
-else:
-   raise ValueError("Unexpected CPD dataset type: expected list/tuple")
+# Use the CPD data already generated and loaded from the first section
+train_input_CPD, train_target_CPD = train_input_long, train_target_long
+cv_input_CPD, cv_target_CPD = cv_input, cv_target  
+test_input_CPD, test_target_CPD = test_input, test_target
+train_init_CPD, cv_init_CPD, test_init_CPD = train_init, cv_init, test_init
 
 
 print("Generate CPD dataset with Known Random Initial State")
@@ -366,13 +360,13 @@ KNet_Pipeline.CPD_Dataset(sys_model_partial, train_input_CPD, train_target_CPD,c
 # Load index_error data
 index_error_data = torch.load(path_results_CPD+'/index_error.pt', map_location=device)
 
-# Separate index and error
-train_input = index_error_data['train_input']
-train_target = index_error_data['train_target']
-cv_input = index_error_data['cv_input']
-cv_target = index_error_data['cv_target']
-test_input = index_error_data['test_input']
-test_target = index_error_data['test_target']
+# Separate index and error - using new variable names to avoid overwriting original data
+train_input_idx = index_error_data['train_input']
+train_target_idx = index_error_data['train_target']
+cv_input_idx = index_error_data['cv_input']
+cv_target_idx = index_error_data['cv_target']
+test_input_idx = index_error_data['test_input']
+test_target_idx = index_error_data['test_target']
 
 x_estimation_test = index_error_data['x_estimation_test']
 x_ture_test = index_error_data['x_ture_test']
@@ -390,8 +384,8 @@ y_estimation_cv = index_error_data['y_estimation_cv']
 y_ture_cv = index_error_data['y_ture_cv']
 
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input, cv_target, train_input, train_target, path_results_CPD, cv_init=cv_init_CPD)
-# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input, test_target, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = CPD_Pipeline.CPDNNTrain(sys_model_CPD,cv_input_idx, cv_target_idx, train_input_idx, train_target_idx, path_results_CPD, cv_init=cv_init_CPD)
+# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, x_out_test, t] = CPD_Pipeline.CPDNNTest(sys_model_CPD,test_input_idx, test_target_idx, path_results_CPD,x_estimation_test,x_ture_test,y_estimation_test,y_ture_test)
 
 
 # Unsupervised stage initialization
@@ -407,11 +401,11 @@ sys_model_online = SystemModel(f, Q, h, R, args.T, args.T_test, m, n,
 sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
 sys_model_KF = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
                            args.T_test,
-                           Q_afterCPD=Q*500,  
-                           f_afterCPD=f,    
-                           h_afterCPD=h,
-                           R_afterCPD=R*1.5,
-                           param_to_change='Q'    
+                           Q_afterCPD=change_point_params.get('Q', Q),  
+                           f_afterCPD=change_point_params.get('F', f),    
+                           h_afterCPD=change_point_params.get('H', hRotate),
+                           R_afterCPD=change_point_params.get('R', R),
+                           param_to_change=change_point_params.get('changed_param', 'Q')    
                            )
 sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
 
@@ -423,8 +417,23 @@ args.n_batch = 1
 unsupervised_pipeline.setTrainingParams(args)
 # Kalman Filter processing
 # Set up changepoint parameters for filter testing
-# EKFTest(args, sys_model_KF, y_ture_train, x_ture_train)
-# UKFTest(args, sys_model_KF, y_ture_train, x_ture_train)
-# PFTest(args, sys_model_KF, y_ture_train, x_ture_train)
+# Create complete changeparameters for EKFTest (must include all required keys)
+ekf_changeparameters = {
+    'Q': change_point_params.get('Q', Q),
+    'R': change_point_params.get('R', R), 
+    'F': change_point_params.get('F', f),
+    'H': change_point_params.get('H', hRotate),
+    'changed_param': change_point_params.get('changed_param', 'Q')
+}
 
-unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_train,x_ture_train,train_init_CPD)
+EKFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
+        changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
+        changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
+UKFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
+        changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
+        changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
+PFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
+       changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
+       changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
+
+unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_test,x_ture_test,test_init_CPD)

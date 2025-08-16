@@ -85,14 +85,14 @@ def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
     for j in range(N_T):# cannot use batch due to different length and std computation   
         if(allStates):
             if args.randomLength:
-                MSE_EKF_linear_arr[j] = loss_fn(EKF.x[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
+                MSE_EKF_linear_arr[j] = loss_fn(EKF_out[j,:,test_lengthMask[j]], test_target[j,:,test_lengthMask[j]]).item()
             else:      
-                MSE_EKF_linear_arr[j] = loss_fn(EKF.x[j,:,:], test_target[j,:,:]).item()
+                MSE_EKF_linear_arr[j] = loss_fn(EKF_out[j,:,:], test_target[j,:,:]).item()
         else: # mask on state
             if args.randomLength:
-                MSE_EKF_linear_arr[j] = loss_fn(EKF.x[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
+                MSE_EKF_linear_arr[j] = loss_fn(EKF_out[j,loc,test_lengthMask[j]], test_target[j,loc,test_lengthMask[j]]).item()
             else:           
-                MSE_EKF_linear_arr[j] = loss_fn(EKF.x[j,loc,:], test_target[j,loc,:]).item()
+                MSE_EKF_linear_arr[j] = loss_fn(EKF_out[j,loc,:], test_target[j,loc,:]).item()
 
     MSE_EKF_linear_avg = torch.mean(MSE_EKF_linear_arr)
     MSE_EKF_dB_avg = 10 * torch.log10(MSE_EKF_linear_avg)
