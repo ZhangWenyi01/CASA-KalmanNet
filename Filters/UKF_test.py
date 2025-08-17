@@ -85,6 +85,12 @@ def UKFTest(args, SysModel, test_input, test_target, allStates=True,
             UKF.Q = Q_after.to(UKF.device)
         elif changed_param == 'R':
             UKF.R = R_after.to(UKF.device)
+        elif changed_param == 'F':
+            # For UKF, F is a function, update the system model function
+            UKF.f = F_after
+        elif changed_param == 'H':
+            # For UKF, H is a function, update the system model function
+            UKF.h = H_after
         
         # Re-initialize UKF using state at change point as new initial condition
         UKF.Init_batched_sequence(final_state, final_covariance)

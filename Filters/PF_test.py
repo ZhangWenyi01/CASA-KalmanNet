@@ -85,6 +85,12 @@ def PFTest(args, SysModel, test_input, test_target, allStates=True,
             PF.Q = Q_after.to(PF.device)
         elif changed_param == 'R':
             PF.R = R_after.to(PF.device)
+        elif changed_param == 'F':
+            # For PF, F is a function, update the system model function
+            PF.f = F_after
+        elif changed_param == 'H':
+            # For PF, H is a function, update the system model function
+            PF.h = H_after
         
         # Re-initialize PF using state at change point as new initial condition
         PF.Init_batched_sequence(final_state, final_covariance)

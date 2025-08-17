@@ -109,7 +109,7 @@ sys_model = SystemModel(
    f, Q, h, R, args.T, args.T_test, m, n,
    Q_afterCPD=change_point_params.get('Q', Q),
    f_afterCPD=change_point_params.get('F', f),
-   h_afterCPD=change_point_params.get('H', hRotate),
+   h_afterCPD=change_point_params.get('H', h),
    R_afterCPD=change_point_params.get('R', R),
    param_to_change=change_point_params.get('changed_param', 'Q')
 )# parameters for GT
@@ -392,18 +392,18 @@ y_ture_cv = index_error_data['y_ture_cv']
 # Load CPDNet model
 sys_model_online = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
                            args.T_test,
-                           Q_afterCPD=Q*500,  
-                           f_afterCPD=f,    
-                           h_afterCPD=h,
-                           R_afterCPD=R*1.5,
-                           param_to_change='Q'    
+                           Q_afterCPD=change_point_params.get('Q', Q),  
+                           f_afterCPD=change_point_params.get('F', f),    
+                           h_afterCPD=change_point_params.get('H', h),
+                           R_afterCPD=change_point_params.get('R', R),
+                           param_to_change=change_point_params.get('changed_param', 'Q')    
                            )
 sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
 sys_model_KF = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
                            args.T_test,
                            Q_afterCPD=change_point_params.get('Q', Q),  
                            f_afterCPD=change_point_params.get('F', f),    
-                           h_afterCPD=change_point_params.get('H', hRotate),
+                           h_afterCPD=change_point_params.get('H', h),
                            R_afterCPD=change_point_params.get('R', R),
                            param_to_change=change_point_params.get('changed_param', 'Q')    
                            )
@@ -422,18 +422,19 @@ ekf_changeparameters = {
     'Q': change_point_params.get('Q', Q),
     'R': change_point_params.get('R', R), 
     'F': change_point_params.get('F', f),
-    'H': change_point_params.get('H', hRotate),
+    'H': change_point_params.get('H', h),
     'changed_param': change_point_params.get('changed_param', 'Q')
 }
 
-EKFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
-        changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
-        changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
-UKFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
-        changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
-        changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
-PFTest(args, sys_model_KF, y_ture_train, x_ture_train, 
-       changepoint=train_ChangePoint if 'train_ChangePoint' in locals() else None, 
-       changeparameters=ekf_changeparameters if 'train_ChangePoint' in locals() else None)
+EKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+        changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+        changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
+UKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+        changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+        changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
 
 unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_test,x_ture_test,test_init_CPD)
+
+PFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+       changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+       changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)

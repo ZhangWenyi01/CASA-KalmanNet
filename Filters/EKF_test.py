@@ -63,6 +63,12 @@ def EKFTest(args, SysModel, test_input, test_target, allStates=True,\
             EKF.Q = Q_after.to(EKF.device)
         elif changed_param == 'R':
             EKF.R = R_after.to(EKF.device)
+        elif changed_param == 'F':
+            # For EKF, F is a function, update the system model function
+            EKF.f = F_after
+        elif changed_param == 'H':
+            # For EKF, H is a function, update the system model function
+            EKF.h = H_after
         
         # Re-initialize EKF using state at change point as new initial condition
         EKF.Init_batched_sequence(final_state, final_covariance)
