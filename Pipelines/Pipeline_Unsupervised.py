@@ -530,78 +530,77 @@ class Pipeline_Unsupervised:
         MSE_Unsupervised_linear_avg = torch.mean(self.MSE_Unsupervised_linear_arr)
         MSE_Unsupervised_dB_avg = 10 * torch.log10(MSE_Unsupervised_linear_avg)
         
-        # Print average MSE results
-        print('Average MSE CPDUnsupervised:', MSE_CPD_dB_avg.item(), '[dB]')
-        print('Average MSE Original KNet:', MSE_Original_KNet_dB_avg.item(), '[dB]')
-        print('Average MSE Unsupervised:', MSE_Unsupervised_dB_avg.item(), '[dB]')
+        # Calculate standard deviations (following EKFTest pattern)
+        MSE_CPD_linear_std = torch.std(self.MSE_CPD_linear_arr, unbiased=True)
+        MSE_Original_KNet_linear_std = torch.std(self.MSE_Original_KNet_linear_arr, unbiased=True)
+        MSE_Unsupervised_linear_std = torch.std(self.MSE_Unsupervised_linear_arr, unbiased=True)
+        
+        # Calculate confidence intervals (following EKFTest pattern)
+        CPD_std_dB = 10 * torch.log10(MSE_CPD_linear_std + MSE_CPD_linear_avg) - MSE_CPD_dB_avg
+        Original_KNet_std_dB = 10 * torch.log10(MSE_Original_KNet_linear_std + MSE_Original_KNet_linear_avg) - MSE_Original_KNet_dB_avg
+        Unsupervised_std_dB = 10 * torch.log10(MSE_Unsupervised_linear_std + MSE_Unsupervised_linear_avg) - MSE_Unsupervised_dB_avg
+        
+        # Print average MSE results with standard deviations
+        print('Average MSE CPDUnsupervised:', MSE_CPD_dB_avg.item(), '[dB], STD:', CPD_std_dB.item(), '[dB]')
+        print('Average MSE Original KNet:', MSE_Original_KNet_dB_avg.item(), '[dB], STD:', Original_KNet_std_dB.item(), '[dB]')
+        print('Average MSE Unsupervised:', MSE_Unsupervised_dB_avg.item(), '[dB], STD:', Unsupervised_std_dB.item(), '[dB]')
         
         # Randomly select one trajectory for plotting
         selected_traj = random.randint(0, self.N_T - 1)
         print(f'Plotting trajectory {selected_traj + 1}/{self.N_T}')
         
-        # Create a single 3D subplot showing Original (baseline), Ours (CPD-triggered), and True trajectories
-        fig = plt.figure(figsize=(10, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        # Original (baseline, no updates)
-        ax.plot(self.state_predictions[selected_traj, 0, :].cpu().detach().numpy(),
-                self.state_predictions[selected_traj, 1, :].cpu().detach().numpy(),
-                self.state_predictions[selected_traj, 2, :].cpu().detach().numpy(),
-                label='original KNet')
-        # Ours (CPD-triggered branch)
-        ax.plot(self.state_original[selected_traj, 0, :].cpu().detach().numpy(),
-                self.state_original[selected_traj, 1, :].cpu().detach().numpy(),
-                self.state_original[selected_traj, 2, :].cpu().detach().numpy(),
-                label='ours')
-        # Unsupervised
-        ax.plot(self.state_unsupervised[selected_traj, 0, :].cpu().detach().numpy(),
-                self.state_unsupervised[selected_traj, 1, :].cpu().detach().numpy(),
-                self.state_unsupervised[selected_traj, 2, :].cpu().detach().numpy(),
-                label='unsupervised')
-        # True
-        ax.plot(x_true[selected_traj, 0, :].cpu().detach().numpy(),
+        # Create a comprehensive plot with four 3D subplots in a row
+        fig = plt.figure(figsize=(20, 5))
+        
+        # True trajectory subplot (first column)
+        ax1 = fig.add_subplot(1, 4, 1, projection='3d')
+        ax1.plot(x_true[selected_traj, 0, :].cpu().detach().numpy(),
                 x_true[selected_traj, 1, :].cpu().detach().numpy(),
                 x_true[selected_traj, 2, :].cpu().detach().numpy(),
-                label='x_true')
-        ax.set_title(f'3D Trajectories (Trajectory {selected_traj + 1}): Original vs Ours vs Unsupervised vs True')
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        ax.legend()
+                color='black', linewidth=2, label='True Trajectory')
+        ax1.set_title('True Trajectory', fontsize=12)
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
+        ax1.legend()
         
+        # CPDUnsupervised trajectory subplot (second column)
+        ax2 = fig.add_subplot(1, 4, 2, projection='3d')
+        ax2.plot(self.state_original[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_original[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_original[selected_traj, 2, :].cpu().detach().numpy(),
+                color='red', linewidth=2, label='CPDUnsupervised')
+        ax2.set_title('CPDUnsupervised', fontsize=12)
+        ax2.set_xlabel('X')
+        ax2.set_ylabel('Y')
+        ax2.set_zlabel('Z')
+        ax2.legend()
+        
+        # Original KNet trajectory subplot (third column)
+        ax3 = fig.add_subplot(1, 4, 3, projection='3d')
+        ax3.plot(self.state_predictions[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_predictions[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_predictions[selected_traj, 2, :].cpu().detach().numpy(),
+                color='blue', linewidth=2, label='Original KNet')
+        ax3.set_title('Original KNet', fontsize=12)
+        ax3.set_xlabel('X')
+        ax3.set_ylabel('Y')
+        ax3.set_zlabel('Z')
+        ax3.legend()
+        
+        # Unsupervised trajectory subplot (fourth column)
+        ax4 = fig.add_subplot(1, 4, 4, projection='3d')
+        ax4.plot(self.state_unsupervised[selected_traj, 0, :].cpu().detach().numpy(),
+                self.state_unsupervised[selected_traj, 1, :].cpu().detach().numpy(),
+                self.state_unsupervised[selected_traj, 2, :].cpu().detach().numpy(),
+                color='green', linewidth=2, label='Unsupervised')
+        ax4.set_title('Unsupervised', fontsize=12)
+        ax4.set_xlabel('X')
+        ax4.set_ylabel('Y')
+        ax4.set_zlabel('Z')
+        ax4.legend()
+        
+        plt.suptitle(f'3D Trajectory Comparison - Trajectory {selected_traj + 1}', fontsize=16)
         plt.tight_layout()
         plt.show()
-
-
-            # # X-axis comparison (unsupervised vs online vs true)
-            # fig_x = plt.figure(figsize=(12, 4))
-            # plt.plot(self.state_predictions[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_unsupervised[trajectorie, 0, :].cpu().detach().numpy(), label='y_out_unsupervised')
-            # plt.plot(x_true[trajectorie, 0, :].cpu().detach().numpy(), label='x_true')
-            # plt.title('X-axis Comparison')
-            # plt.xlabel('Time')
-            # plt.ylabel('X')
-            # plt.legend()
-            # plt.show()
-
-            # # Y-axis comparison (unsupervised vs online vs true)
-            # fig_y = plt.figure(figsize=(12, 4))
-            # plt.plot(self.state_predictions[trajectorie, 1, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_unsupervised[trajectorie, 1, :].cpu().detach().numpy(), label='y_out_unsupervised')
-            # plt.plot(x_true[trajectorie, 1, :].cpu().detach().numpy(), label='x_true')
-            # plt.title('Y-axis Comparison')
-            # plt.xlabel('Time')
-            # plt.ylabel('Y')
-            # plt.legend()
-            # plt.show()
-
-            # # Z-axis comparison (unsupervised vs online vs true)
-            # fig_z = plt.figure(figsize=(12, 4))
-            # plt.plot(self.state_predictions[trajectorie, 2, :].cpu().detach().numpy(), label='y_out_online')
-            # plt.plot(self.state_unsupervised[trajectorie, 2, :].cpu().detach().numpy(), label='y_out_unsupervised')
-            # plt.plot(x_true[trajectorie, 2, :].cpu().detach().numpy(), label='x_true')
-            # plt.title('Z-axis Comparison')
-            # plt.xlabel('Time')
-            # plt.ylabel('Z')
-            # plt.legend()
-            # plt.show()
 

@@ -71,7 +71,7 @@ offset = 0 # offset for the data
 chop = False # whether to chop data sequences into shorter sequences
 path_results = 'KNet/'
 DatafolderName = 'Simulations/Lorenz_Atractor/data' + '/'
-switch = 'partial' # 'full' or 'partial' or 'estH'
+switch = 'full' # 'full' or 'partial' or 'estH'
    
 # noise q and r
 r2 = torch.tensor([0.1]) # [100, 10, 1, 0.1, 0.01]
@@ -323,11 +323,11 @@ path_results_CPD = 'CPDNet_lor/'
 
 sys_model_CPD = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
                            args.T_test,
-                           Q_afterCPD=Q*500,  
-                           f_afterCPD=f,    
-                           h_afterCPD=h,
-                           R_afterCPD=R*1.5,
-                           param_to_change='Q'    
+                           Q_afterCPD=change_point_params.get('Q', Q),  
+                           f_afterCPD=change_point_params.get('F', f),    
+                           h_afterCPD=change_point_params.get('H', h),
+                           R_afterCPD=change_point_params.get('R', R),
+                           param_to_change=change_point_params.get('changed_param', 'Q')      
                            )
 sys_model_CPD.InitSequence(m1x_0, m2x_0)# x0 and P0
 # Build Neural Network
@@ -390,51 +390,75 @@ y_ture_cv = index_error_data['y_ture_cv']
 
 # Unsupervised stage initialization
 # Load CPDNet model
-sys_model_online = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
-                           args.T_test,
-                           Q_afterCPD=change_point_params.get('Q', Q),  
-                           f_afterCPD=change_point_params.get('F', f),    
-                           h_afterCPD=change_point_params.get('H', h),
-                           R_afterCPD=change_point_params.get('R', R),
-                           param_to_change=change_point_params.get('changed_param', 'Q')    
-                           )
-sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
-sys_model_KF = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
-                           args.T_test,
-                           Q_afterCPD=change_point_params.get('Q', Q),  
-                           f_afterCPD=change_point_params.get('F', f),    
-                           h_afterCPD=change_point_params.get('H', h),
-                           R_afterCPD=change_point_params.get('R', R),
-                           param_to_change=change_point_params.get('changed_param', 'Q')    
-                           )
-sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
+if switch == 'full':
+   sys_model_online = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
+                              args.T_test,
+                              Q_afterCPD=change_point_params.get('Q', Q),  
+                              f_afterCPD=change_point_params.get('F', f),    
+                              h_afterCPD=change_point_params.get('H', h),
+                              R_afterCPD=change_point_params.get('R', R),
+                              param_to_change=change_point_params.get('changed_param', 'Q')    
+                              )
+   sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
+   sys_model_KF = SystemModel(f, Q, h, R, args.T, args.T_test, m, n, 
+                              args.T_test,
+                              Q_afterCPD=change_point_params.get('Q', Q),  
+                              f_afterCPD=change_point_params.get('F', f),    
+                              h_afterCPD=change_point_params.get('H', h),
+                              R_afterCPD=change_point_params.get('R', R),
+                              param_to_change=change_point_params.get('changed_param', 'Q')    
+                              )
+   sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
 
-unsupervised_pipeline = Pipeline_Unsupervised()
-unsupervised_pipeline.setCPDNet('CPDNet_lor')
-unsupervised_pipeline.setKNet_lor('KNet')
-unsupervised_pipeline.setssModel(sys_model_online)
-args.n_batch = 1
-unsupervised_pipeline.setTrainingParams(args)
-# Kalman Filter processing
-# Set up changepoint parameters for filter testing
-# Create complete changeparameters for EKFTest (must include all required keys)
-ekf_changeparameters = {
-    'Q': change_point_params.get('Q', Q),
-    'R': change_point_params.get('R', R), 
-    'F': change_point_params.get('F', f),
-    'H': change_point_params.get('H', h),
-    'changed_param': change_point_params.get('changed_param', 'Q')
-}
+   unsupervised_pipeline = Pipeline_Unsupervised()
+   unsupervised_pipeline.setCPDNet('CPDNet_lor')
+   unsupervised_pipeline.setKNet_lor('KNet')
+   unsupervised_pipeline.setssModel(sys_model_online)
+   args.n_batch = 1
+   unsupervised_pipeline.setTrainingParams(args)
+   # Kalman Filter processing
+   # Set up changepoint parameters for filter testing
+   # Create complete changeparameters for EKFTest (must include all required keys)
+   ekf_changeparameters = {
+      'Q': change_point_params.get('Q', Q),
+      'R': change_point_params.get('R', R), 
+      'F': change_point_params.get('F', f),
+      'H': change_point_params.get('H', h),
+      'changed_param': change_point_params.get('changed_param', 'Q')
+   }
 
-EKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
-        changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
-        changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
-UKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
-        changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
-        changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
+   # EKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+   #       changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+   #       changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
+   # UKFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+   #       changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+   #       changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
 
-unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_test,x_ture_test,test_init_CPD)
+   unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_test,x_ture_test,test_init_CPD)
 
-PFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
-       changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
-       changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
+   # PFTest(args, sys_model_KF, y_ture_test, x_ture_test, 
+   #       changepoint=test_ChangePoint if 'test_ChangePoint' in locals() else None, 
+   #       changeparameters=ekf_changeparameters if 'test_ChangePoint' in locals() else None)
+elif switch == 'partial':
+   sys_model_online = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, args.T_test)
+   sys_model_online.InitSequence(m1x_0, m2x_0)# x0 and P0
+   sys_model_KF = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, args.T_test)
+   sys_model_KF.InitSequence(m1x_0, m2x_0)# x0 and P0
+
+   unsupervised_pipeline = Pipeline_Unsupervised()
+   unsupervised_pipeline.setCPDNet('CPDNet_lor')
+   unsupervised_pipeline.setKNet_lor('KNet')
+   unsupervised_pipeline.setssModel(sys_model_online)
+   args.n_batch = 1
+   unsupervised_pipeline.setTrainingParams(args)
+   # Kalman Filter processing
+   # Set up changepoint parameters for filter testing
+
+   EKFTest(args, sys_model_KF, y_ture_test, x_ture_test)
+   UKFTest(args, sys_model_KF, y_ture_test, x_ture_test)
+
+   unsupervised_pipeline.NNTrain_lor(sys_model_online,y_ture_test,x_ture_test,test_init_CPD)
+
+   PFTest(args, sys_model_KF, y_ture_test, x_ture_test)
+else:
+   pass

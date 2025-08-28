@@ -115,28 +115,24 @@ class Pipeline_CPD:
 
         # Plot state and observation results
         plt.subplot(2, 1, 2)
-        plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], label='estimation state', color='red')
-        plt.plot(plot_data['true_state'][batch_idx, 0, :-5], label='true state', color='blue')
-        plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], label='estimation y', color='black')
-        plt.plot(plot_data['true_y'][batch_idx, 0, :-5], label='true y')
-        plt.axvline(x=plot_data['changepoint'], color='green', linestyle='--', 
+        plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], label='estimation state', 
+                color='red', linestyle='-', linewidth=2, marker='o', markersize=3, markevery=5)
+        plt.plot(plot_data['true_state'][batch_idx, 0, :-5], label='true state', 
+                color='blue', linestyle='--', linewidth=2, marker='s', markersize=3, markevery=5)
+        plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], label='estimation y', 
+                color='black', linestyle='-.', linewidth=2, marker='^', markersize=3, markevery=5)
+        plt.plot(plot_data['true_y'][batch_idx, 0, :-5], label='true y', 
+                color='green', linestyle=':', linewidth=2, marker='d', markersize=3, markevery=5)
+        plt.axvline(x=plot_data['changepoint'], color='red', linestyle='--', linewidth=3,
                     label=f'Changepoint ({plot_data["changepoint"]})')
         plt.xlabel('Time Step')
         plt.ylabel('Value (Dimension 1)')
         plt.legend()
+        plt.grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.show()
 
-        # # Create directory if it doesn't exist
-        # save_dir = 'plot_data'
-        # if not os.path.exists(save_dir):
-        #     os.makedirs(save_dir)
-        # # Save data to file
-        # torch.save(plot_data, os.path.join(save_dir, f'CPDNet_results_H_0.95.pt'))
-
-        # # 将x_ouot_test中每一个点的数值与threshold对比，超过threshold的点设为1，否则设为0
-        # x_out_test_compared = (x_out_test > threshold).float()
         end = time.time()
         t = end - start
 

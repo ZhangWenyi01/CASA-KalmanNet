@@ -29,7 +29,7 @@ J = 5
 J_mod = 2
 
 ### Angle of rotation in the 3 axes
-roll_deg = yaw_deg = pitch_deg = 1
+roll_deg = yaw_deg = pitch_deg = -1
 
 roll = roll_deg * (math.pi/180)
 yaw = yaw_deg * (math.pi/180)
@@ -148,8 +148,46 @@ def h(x, jacobian=False):
     else:
         return y
 
-def h_nonlinear(x):
-    return toSpherical(x)
+def h_nonlinear(x, jacobian=False):
+    y = toSpherical(x)
+    if jacobian:
+        # Compute Jacobian matrix for spherical coordinates
+        batch_size = x.shape[0]
+        device = x.device
+        
+        # Initialize Jacobian matrix [batch_size, n, m] = [batch_size, 3, 3]
+        H = torch.zeros(batch_size, 3, 3, device=device)
+        
+        for i in range(batch_size):
+            x_i = x[i, :, 0] if x.dim() == 3 else x[i, :]  # [3]
+            
+            # Compute partial derivatives
+            rho = torch.linalg.norm(x_i)
+            x1, x2, x3 = x_i[0], x_i[1], x_i[2]
+            
+            # Avoid division by zero
+            if rho < 1e-8:
+                rho = 1e-8
+            
+            # d(rho)/dx = x/rho
+            H[i, 0, 0] = x1 / rho
+            H[i, 0, 1] = x2 / rho
+            H[i, 0, 2] = x3 / rho
+            
+            # d(theta)/dx = d(acos(x3/rho))/dx
+            if abs(x3) < rho - 1e-8:  # Avoid acos domain issues
+                H[i, 1, 0] = -x1 * x3 / (rho * torch.sqrt(rho**2 - x3**2))
+                H[i, 1, 1] = -x2 * x3 / (rho * torch.sqrt(rho**2 - x3**2))
+                H[i, 1, 2] = (rho**2 - x3**2) / (rho * torch.sqrt(rho**2 - x3**2))
+            
+            # d(phi)/dx = d(atan2(x2, x1))/dx
+            H[i, 2, 0] = -x2 / (x1**2 + x2**2)
+            H[i, 2, 1] = x1 / (x1**2 + x2**2)
+            H[i, 2, 2] = 0.0
+        
+        return y, H
+    else:
+        return y
 
 def hRotate(x, jacobian=False):
     H = H_Rotate.to(x.device).reshape((1, n, n)).repeat(x.shape[0], 1, 1)# [batch_size, n, n] rotated matrix

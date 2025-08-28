@@ -18,29 +18,36 @@ def plot_CPDNet_results(plot_data, batch_idx=20, param_type='R', lambda_value=2)
     
     # Plot CPD results
     plt.subplot(2, 1, 1)
-    plt.plot(plot_data['predicted_cpd'][batch_idx, 0, :-5], label="Predicted CPD probability", linestyle='--')
-    plt.plot(plot_data['actual_cpd'][batch_idx, 0, :-5], label="Actual CPD probability", linestyle='-')
-    plt.axvline(x=plot_data['changepoint'], color='green', linestyle='--', 
+    plt.plot(plot_data['predicted_cpd'][batch_idx, 0, :-5], label="Predicted CPD probability", 
+             linestyle='--', linewidth=2, marker='s', markersize=4, markevery=5)
+    plt.plot(plot_data['actual_cpd'][batch_idx, 0, :-5], label="Actual CPD probability", 
+             linestyle='-', linewidth=2, marker='o', markersize=4, markevery=5)
+    plt.axvline(x=plot_data['changepoint'], color='red', linestyle='--', linewidth=3,
                 label=f'Changepoint ({plot_data["changepoint"]})')
     plt.xlabel("Time Steps")
     plt.ylabel("Value")
     # plt.title(f"CPDNet Prediction ({param_type} = {lambda_value})")
     plt.title(f"CPDNet Prediction")
     plt.legend()
-    plt.grid()
+    plt.grid(True, alpha=0.3)
 
     # Plot state and observation results
     plt.subplot(2, 1, 2)
-    plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], label='estimation state', color='red')
-    plt.plot(plot_data['true_state'][batch_idx, 0, :-5], label='true state', color='blue')
-    plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], label='estimation y', color='black')
-    plt.plot(plot_data['true_y'][batch_idx, 0, :-5], label='true y')
-    plt.axvline(x=plot_data['changepoint'], color='green', linestyle='--', 
+    plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], label='estimation state', 
+             color='red', linestyle='-', linewidth=2, marker='o', markersize=3, markevery=5)
+    plt.plot(plot_data['true_state'][batch_idx, 0, :-5], label='true state', 
+             color='blue', linestyle='--', linewidth=2, marker='s', markersize=3, markevery=5)
+    plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], label='estimation y', 
+             color='black', linestyle='-.', linewidth=2, marker='^', markersize=3, markevery=5)
+    plt.plot(plot_data['true_y'][batch_idx, 0, :-5], label='true y', 
+             color='green', linestyle=':', linewidth=2, marker='d', markersize=3, markevery=5)
+    plt.axvline(x=plot_data['changepoint'], color='red', linestyle='--', linewidth=3,
                 label=f'Changepoint ({plot_data["changepoint"]})')
     plt.title(f'KalmanNet output and true state')
     plt.xlabel('Time Step')
     plt.ylabel('Value (Dimension 1)')
     plt.legend()
+    plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
     
