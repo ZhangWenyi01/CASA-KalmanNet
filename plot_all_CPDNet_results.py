@@ -11,6 +11,16 @@ import glob
 import argparse
 from pathlib import Path
 
+# Font size configuration - adjust these values to change all font sizes
+FONT_CONFIG = {
+    'title': 24,        # Main title font size
+    'axis_label': 20,   # X and Y axis label font size
+    'legend': 16,       # Legend font size
+    'tick': 14,         # Tick label font size
+    'line_width': 2.5,  # Line width for better visibility
+    'marker_size': 5    # Marker size for better visibility
+}
+
 def check_data_structure(plot_data):
     """
     Check the structure of loaded plot data
@@ -67,39 +77,47 @@ def plot_CPDNet_results_enhanced(plot_data, batch_idx=6, param_type='R', lambda_
     plt.subplot(2, 1, 1)
     plt.plot(plot_data['predicted_cpd'][batch_idx, 0, :-5], 
              label="Predicted CPD probability", 
-             linestyle='--', linewidth=2, marker='s', markersize=4, markevery=5)
+             linestyle='--', linewidth=FONT_CONFIG['line_width'], 
+             marker='s', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.plot(plot_data['actual_cpd'][batch_idx, 0, :-5], 
              label="Actual CPD probability", 
-             linestyle='-', linewidth=2, marker='o', markersize=4, markevery=5)
+             linestyle='-', linewidth=FONT_CONFIG['line_width'], 
+             marker='o', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.axvline(x=plot_data['changepoint'], color='red', linestyle='--', linewidth=3,
                 label=f'Changepoint ({plot_data["changepoint"]})')
-    plt.xlabel("Time Steps")
-    plt.ylabel("CPD Probability")
-    plt.title(f"CPDNet Prediction - {param_type} = {lambda_value}")
-    plt.legend(fontsize=12)
+    plt.xlabel("Time Steps", fontsize=FONT_CONFIG['axis_label'])
+    plt.ylabel("CPD Probability", fontsize=FONT_CONFIG['axis_label'])
+    plt.title(f"CPDNet Prediction - {param_type} = {lambda_value}", fontsize=FONT_CONFIG['title'])
+    plt.legend(fontsize=FONT_CONFIG['legend'])
     plt.grid(True, alpha=0.3)
+    plt.tick_params(axis='both', which='major', labelsize=FONT_CONFIG['tick'])
     
     # Plot state and observation results (bottom subplot)
     plt.subplot(2, 1, 2)
     plt.plot(plot_data['estimation_state'][batch_idx, 0, :-5], 
              label='estimation state', 
-             color='red', linestyle='-', linewidth=2, marker='o', markersize=3, markevery=5)
+             color='red', linestyle='-', linewidth=FONT_CONFIG['line_width'], 
+             marker='o', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.plot(plot_data['true_state'][batch_idx, 0, :-5], 
              label='true state', 
-             color='blue', linestyle='--', linewidth=2, marker='s', markersize=3, markevery=5)
+             color='blue', linestyle='--', linewidth=FONT_CONFIG['line_width'], 
+             marker='s', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.plot(plot_data['estimation_y'][batch_idx, 0, :-5], 
              label='estimation y', 
-             color='black', linestyle='-.', linewidth=2, marker='^', markersize=3, markevery=5)
+             color='black', linestyle='-.', linewidth=FONT_CONFIG['line_width'], 
+             marker='^', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.plot(plot_data['true_y'][batch_idx, 0, :-5], 
              label='true y', 
-             color='green', linestyle=':', linewidth=2, marker='d', markersize=3, markevery=5)
+             color='green', linestyle=':', linewidth=FONT_CONFIG['line_width'], 
+             marker='d', markersize=FONT_CONFIG['marker_size'], markevery=5)
     plt.axvline(x=plot_data['changepoint'], color='red', linestyle='--', linewidth=3,
                 label=f'Changepoint ({plot_data["changepoint"]})')
-    plt.title(f'KalmanNet Output and True State - {param_type} = {lambda_value}')
-    plt.xlabel('Time Step')
-    plt.ylabel('Value (Dimension 1)')
-    plt.legend(fontsize=12)
+    plt.title(f'KalmanNet Output and True State - {param_type} = {lambda_value}', fontsize=FONT_CONFIG['title'])
+    plt.xlabel('Time Step', fontsize=FONT_CONFIG['axis_label'])
+    plt.ylabel('Value (Dimension 1)', fontsize=FONT_CONFIG['axis_label'])
+    plt.legend(fontsize=FONT_CONFIG['legend'])
     plt.grid(True, alpha=0.3)
+    plt.tick_params(axis='both', which='major', labelsize=FONT_CONFIG['tick'])
     
     plt.tight_layout()
     
@@ -137,6 +155,9 @@ def extract_params_from_filename(filename):
     """
     # Remove path and extension
     basename = os.path.basename(filename)
+    # Remove .pt extension if present
+    if basename.endswith('.pt'):
+        basename = basename[:-3]
     name_parts = basename.split('_')
     
     # Extract parameter type (R, Q, F, H)
@@ -215,7 +236,7 @@ def plot_specific_file(filename, batch_idx=6, save_figure=True):
         if save_figure:
             output_dir = "CPDNet_plots"
             os.makedirs(output_dir, exist_ok=True)
-            save_filename = f"CPDNet_{param_type}_{lambda_value}.pdf"
+            save_filename = f"CPDNet_results_{param_type}_{lambda_value}.pdf"
             save_path = os.path.join(output_dir, save_filename)
         
         # Plot results
