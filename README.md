@@ -1,4 +1,4 @@
-# CPDNet: Change Point Detection Network for State Estimation
+# CASA-KalmanNet: Change-Aware Self-Adaptive AI-AidedKalman Filters with Neural Change Point Detection
 
 CPDNet is a deep learning framework for detecting change points in dynamic systems and improving state estimation performance. The project combines traditional Kalman filtering techniques with neural networks to achieve robust change point detection and adaptive state estimation.
 
