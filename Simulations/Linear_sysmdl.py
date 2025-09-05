@@ -82,7 +82,7 @@ class SystemModel:
         else:
             self.R_afterCPD = R_afterCPD
 
-        # 添加要改变的参数属性
+        # Add parameter to change attribute
         self.param_to_change = param_to_change
 
     def f(self, x):
@@ -351,7 +351,7 @@ class SystemModel:
             print('change_index:', change_index)
             self.changepoint = change_index
             
-            # 使用指定的参数而不是随机选择
+            # Use specified parameter instead of random selection
             print(f'Changing parameter: {self.param_to_change}')
             
             for t in range(0, T):

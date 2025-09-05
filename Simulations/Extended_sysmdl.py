@@ -44,7 +44,7 @@ class SystemModel:
         # Assign T
         self.T = T
         self.T_test = T_test
-        self.changepoint = 0  # 添加突变点属性
+        self.changepoint = 0  # Add changepoint attribute
 
         #########################
         ### Covariance Priors ###
@@ -64,7 +64,7 @@ class SystemModel:
         else:
             self.prior_S = prior_S
 
-        # 添加突变后的参数
+        # Add parameters after changepoint
         if f_afterCPD is None:
             self.f_afterCPD = self.f
         else:
@@ -80,7 +80,7 @@ class SystemModel:
         else:
             self.R_afterCPD = R_afterCPD
 
-        # 添加要改变的参数属性
+        # Add parameter to change attribute
         self.param_to_change = param_to_change
 
     #####################
@@ -283,7 +283,7 @@ class SystemModel:
 
     def GenerateBatchCPD(self, args, size, T, randomInit=False):
         if(randomInit):
-            # 随机初始化部分保持不变
+            # Random initialization part remains unchanged
             self.m1x_0_rand = torch.zeros(size, self.m, 1)
             self.prior_x = torch.zeros(size, self.m, self.T)
             if args.distribution == 'uniform':
@@ -303,19 +303,19 @@ class SystemModel:
             initConditions = self.m1x_0.view(1,self.m,1).expand(size,-1,-1)
             self.Init_batched_sequence(initConditions, self.m2x_0)
 
-        # 设置突变点
+        # Set changepoint
         change_index = torch.randint(20, T-40, (1,)).item()
         print('change_index:', change_index)
         self.changepoint = change_index
         print(f'Changing parameter: {self.param_to_change}')
 
-        # 分配数组
+        # Allocate arrays
         self.Input = torch.empty(size, self.n, T)
         self.Target = torch.empty(size, self.m, T)
         self.x_prev = self.m1x_0_batch
         xt = self.x_prev
 
-        # 生成序列
+        # Generate sequence
         for t in range(0, T):
             ########################
             #### State Evolution ###
@@ -375,7 +375,7 @@ class SystemModel:
                 er = distrib.rsample().view(size,self.n,1)
                 yt = torch.add(yt,er)
 
-            # 保存结果
+            # Save results
             self.Target[:, :, t] = torch.squeeze(xt,2)
             self.Input[:, :, t] = torch.squeeze(yt,2)
             self.x_prev = xt

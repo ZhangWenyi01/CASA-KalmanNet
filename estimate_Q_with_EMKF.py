@@ -1194,8 +1194,8 @@ def sliding_window_EMKF(observations, true_states, F_true, H_true, R_true,
 
 def Lag1AutoCov_FilterOnly(K, F, H, P):
     """
-    简化的滞后协方差计算，仅使用滤波器输出
-    这是一个近似方法，精度会降低，但不需要平滑器
+    Simplified lag covariance calculation using only filter output
+    This is an approximation method with reduced accuracy but no smoother required
     """
     T = len(P) - 1
     if isinstance(F, np.ndarray):
@@ -1203,12 +1203,12 @@ def Lag1AutoCov_FilterOnly(K, F, H, P):
     else:
         n = 1
 
-    # 使用滤波器输出的简化近似
+    # Simplified approximation using filter output
     if n > 1:
         V = np.zeros((T, n, n))
         for i in range(T):
-            # 简化的滞后协方差近似
-            # 基于滤波器的预测误差协方差
+            # Simplified lag covariance approximation
+            # Based on filter prediction error covariance
             V[i] = (np.eye(n) - K[i] @ H) @ F @ P[i] @ F.T * 0.5
     else:
         V = np.zeros(T)
@@ -1219,8 +1219,8 @@ def Lag1AutoCov_FilterOnly(K, F, H, P):
 
 def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihood=0.01, tol_params=0.005, em_vars=["F", "Q", "H", "R", "xi", "L"]):
     """
-    仅使用滤波器的EM算法版本（不使用平滑器）
-    注意：这会降低估计精度，但计算更快
+    EM algorithm version using only filter (no smoother)
+    Note: This reduces estimation accuracy but is faster to compute
     """
     T = len(z)
     if isinstance(xi_0, np.ndarray):
@@ -1249,14 +1249,14 @@ def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihoo
             A_5 += np.outer(z[j], z[j])
 
         for i in range(max_it):
-            # E-step (仅使用滤波器)
+            # E-step (using only filter)
             x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
             
-            # 用滤波器输出替代平滑器输出
-            x_tilde = x_hat[1:]  # 去掉初始状态
-            P_tilde = P[1:]      # 去掉初始协方差
+            # Use filter output instead of smoother output
+            x_tilde = x_hat[1:]  # Remove initial state
+            P_tilde = P[1:]      # Remove initial covariance
             
-            # 使用简化的滞后协方差计算
+            # Use simplified lag covariance calculation
             V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
 
             likelihood = np.append(likelihood, [ell(H[i], R[i], z, x_hat_minus, P_minus)], axis=0)
@@ -1266,7 +1266,7 @@ def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihoo
             if i >= 1 and likelihood[i + 1] - likelihood[i] < tol_likelihood:
                 convergence_count += 1
 
-            # M-step (与原版相同)
+            # M-step (same as original)
             A_1 = np.zeros((n, n))
             A_2 = np.zeros((n, n))
             A_3 = np.zeros((n, n))
@@ -1282,7 +1282,7 @@ def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihoo
                 A_3 += np.outer(x_tilde[j], x_tilde[j]) + P_tilde[j]
                 A_4 += np.outer(z[j], x_tilde[j])
 
-            # 参数更新（与原版相同）
+            # Parameter update (same as original)
             if "F" in em_vars:
                 F = np.append(F, [A_1 @ np.linalg.inv(A_2)], 0)
                 if i >= 1 and np.all(np.abs(F[i + 1] - F[i]) < tol_params):
@@ -1353,12 +1353,12 @@ def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihoo
             A_5 += z[j] ** 2
 
         for i in range(max_it):
-            # E-step (仅使用滤波器)
+            # E-step (using only filter)
             x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
             
-            # 用滤波器输出替代平滑器输出
-            x_tilde = x_hat[1:]  # 去掉初始状态
-            P_tilde = P[1:]      # 去掉初始协方差
+            # Use filter output instead of smoother output
+            x_tilde = x_hat[1:]  # Remove initial state
+            P_tilde = P[1:]      # Remove initial covariance
             
             V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
 
@@ -1453,12 +1453,12 @@ def EMKF_FilterOnly(F_0, Q_0, H_0, R_0, z, xi_0, L_0, max_it=1000, tol_likelihoo
             A_5 += z[j] ** 2
 
         for i in range(max_it):
-            # E-step (仅使用滤波器)
+            # E-step (using only filter)
             x_hat_minus, P_minus, K, x_hat, P = KalmanFilter(F[i], Q[i], H[i], R[i], z, xi[i], L[i])
             
-            # 用滤波器输出替代平滑器输出
-            x_tilde = x_hat[1:]  # 去掉初始状态
-            P_tilde = P[1:]      # 去掉初始协方差
+            # Use filter output instead of smoother output
+            x_tilde = x_hat[1:]  # Remove initial state
+            P_tilde = P[1:]      # Remove initial covariance
             
             V = Lag1AutoCov_FilterOnly(K, F[i], H[i], P)
 
